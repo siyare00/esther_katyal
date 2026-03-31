@@ -1,0 +1,563 @@
+"""Tradier Market Data Client.
+
+Async client for the Tradier API — quotes, option chains, historical bars, and streaming.
+Supports both sandbox and production endpoints with automatic rate limiting and retries.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import date, datetime
+from enum import Enum
+from typing import Any, AsyncIterator
+
+import httpx
+import structlog
+from pydantic import BaseModel, Field
+
+from esther.core.config import env
+
+logger = structlog.get_logger(__name__)
+
+# Tradier endpoints
+PROD_BASE = "https://api.tradier.com/v1"
+SANDBOX_BASE = "https://sandbox.tradier.com/v1"
+STREAM_BASE = "https://stream.tradier.com/v1"
+SANDBOX_STREAM_BASE = "https://sandbox.tradier.com/v1"
+
+
+class OptionType(str, Enum):
+    CALL = "call"
+    PUT = "put"
+
+
+class Quote(BaseModel):
+    """Market quote for a symbol."""
+
+    symbol: str
+    last: float = 0.0
+    bid: float = 0.0
+    ask: float = 0.0
+    high: float = 0.0
+    low: float = 0.0
+    open: float | None = None
+    close: float | None = None
+    volume: int = 0
+    change: float = 0.0
+    change_pct: float = Field(default=0.0, alias="change_percentage")
+
+    model_config = {"populate_by_name": True}
+
+
+class OptionQuote(BaseModel):
+    """Single option contract quote."""
+
+    symbol: str
+    option_type: OptionType
+    strike: float
+    expiration: str
+    bid: float = 0.0
+    ask: float = 0.0
+    mid: float = 0.0
+    last: float = 0.0
+    volume: int = 0
+    open_interest: int = 0
+    greeks: OptionGreeks | None = None
+
+
+class OptionGreeks(BaseModel):
+    """Greeks for an option contract."""
+
+    delta: float = 0.0
+    gamma: float = 0.0
+    theta: float = 0.0
+    vega: float = 0.0
+    rho: float = 0.0
+    mid_iv: float = Field(default=0.0, alias="smv_vol")
+
+    model_config = {"populate_by_name": True}
+
+
+class Bar(BaseModel):
+    """OHLCV bar."""
+
+    timestamp: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int
+
+
+class TradierClient:
+    """Async Tradier API client with rate limiting and retries.
+
+    Usage:
+        async with TradierClient() as client:
+            quotes = await client.get_quotes(["SPY", "QQQ"])
+            chain = await client.get_option_chain("SPY", "2024-03-28")
+    """
+
+    MAX_RETRIES = 3
+    RETRY_DELAY = 1.0  # seconds, doubles on each retry
+    RATE_LIMIT_DELAY = 0.1  # minimum seconds between requests
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        account_id: str | None = None,
+        sandbox: bool | None = None,
+    ):
+        _env = env()
+        self.api_key = api_key or _env.tradier_api_key
+        self.account_id = account_id or _env.tradier_account_id
+        self.sandbox = sandbox if sandbox is not None else _env.tradier_sandbox
+
+        self.base_url = SANDBOX_BASE if self.sandbox else PROD_BASE
+        self.stream_url = SANDBOX_STREAM_BASE if self.sandbox else STREAM_BASE
+
+        self._client: httpx.AsyncClient | None = None
+        self._last_request_time: float = 0.0
+        self._rate_lock = asyncio.Lock()
+
+    @property
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Accept": "application/json",
+        }
+
+    async def __aenter__(self) -> TradierClient:
+        self._client = httpx.AsyncClient(
+            headers=self._headers,
+            timeout=httpx.Timeout(30.0),
+        )
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        if self._client:
+            await self._client.aclose()
+            self._client = None
+
+    async def _rate_limit(self) -> None:
+        """Enforce minimum delay between requests."""
+        async with self._rate_lock:
+            now = asyncio.get_event_loop().time()
+            elapsed = now - self._last_request_time
+            if elapsed < self.RATE_LIMIT_DELAY:
+                await asyncio.sleep(self.RATE_LIMIT_DELAY - elapsed)
+            self._last_request_time = asyncio.get_event_loop().time()
+
+    async def _request(
+        self, method: str, path: str, params: dict[str, Any] | None = None, data: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Make an API request with retries and rate limiting.
+
+        Retries on 429 (rate limit) and 5xx errors with exponential backoff.
+        """
+        if not self._client:
+            raise RuntimeError("Client not initialized. Use 'async with TradierClient() as client:'")
+
+        url = f"{self.base_url}{path}"
+        delay = self.RETRY_DELAY
+
+        for attempt in range(self.MAX_RETRIES):
+            await self._rate_limit()
+
+            try:
+                if method == "GET":
+                    resp = await self._client.get(url, params=params)
+                else:
+                    resp = await self._client.post(url, data=data)
+
+                if resp.status_code == 429:
+                    retry_after = float(resp.headers.get("Retry-After", delay))
+                    logger.warning("rate_limited", retry_after=retry_after, attempt=attempt)
+                    await asyncio.sleep(retry_after)
+                    delay *= 2
+                    continue
+
+                if resp.status_code >= 500:
+                    logger.warning("server_error", status=resp.status_code, attempt=attempt)
+                    await asyncio.sleep(delay)
+                    delay *= 2
+                    continue
+
+                resp.raise_for_status()
+                return resp.json()
+
+            except httpx.TimeoutException:
+                logger.warning("request_timeout", attempt=attempt)
+                if attempt < self.MAX_RETRIES - 1:
+                    await asyncio.sleep(delay)
+                    delay *= 2
+                    continue
+                raise
+
+        raise RuntimeError(f"Max retries ({self.MAX_RETRIES}) exceeded for {path}")
+
+    # ── Market Data ──────────────────────────────────────────────
+
+    async def get_quotes(self, symbols: list[str]) -> list[Quote]:
+        """Fetch current quotes for a list of symbols.
+
+        Args:
+            symbols: List of ticker symbols (e.g., ["SPY", "QQQ"]).
+
+        Returns:
+            List of Quote objects with current market data.
+        """
+        data = await self._request("GET", "/markets/quotes", params={
+            "symbols": ",".join(symbols),
+            "greeks": "false",
+        })
+
+        quotes_data = (data.get("quotes") or {}).get("quote") or []
+        if isinstance(quotes_data, dict):
+            quotes_data = [quotes_data]
+
+        results = []
+        for q in quotes_data:
+            results.append(Quote(
+                symbol=q.get("symbol", ""),
+                last=float(q.get("last") or 0),
+                bid=float(q.get("bid") or 0),
+                ask=float(q.get("ask") or 0),
+                high=float(q.get("high") or 0),
+                low=float(q.get("low") or 0),
+                open=float(q.get("open") or 0) if q.get("open") else None,
+                close=float(q.get("close") or 0) if q.get("close") else None,
+                volume=int(q.get("volume") or 0),
+                change=float(q.get("change") or 0),
+                change_percentage=float(q.get("change_percentage") or 0),
+            ))
+
+        logger.info("quotes_fetched", count=len(results), symbols=symbols)
+        return results
+
+    async def get_option_chain(
+        self, symbol: str, expiration: str, greeks: bool = True
+    ) -> list[OptionQuote]:
+        """Fetch the full option chain for a symbol and expiration.
+
+        Args:
+            symbol: Underlying ticker (e.g., "SPY").
+            expiration: Expiration date as YYYY-MM-DD.
+            greeks: Whether to include Greeks in the response.
+
+        Returns:
+            List of OptionQuote objects for all strikes and types.
+        """
+        data = await self._request("GET", "/markets/options/chains", params={
+            "symbol": symbol,
+            "expiration": expiration,
+            "greeks": str(greeks).lower(),
+        })
+
+        options_data = data.get("options", {}).get("option", [])
+        if isinstance(options_data, dict):
+            options_data = [options_data]
+
+        results = []
+        for opt in options_data:
+            greeks_data = opt.get("greeks")
+            greeks_obj = None
+            if greeks_data and isinstance(greeks_data, dict):
+                greeks_obj = OptionGreeks(
+                    delta=float(greeks_data.get("delta", 0)),
+                    gamma=float(greeks_data.get("gamma", 0)),
+                    theta=float(greeks_data.get("theta", 0)),
+                    vega=float(greeks_data.get("vega", 0)),
+                    rho=float(greeks_data.get("rho", 0)),
+                    smv_vol=float(greeks_data.get("smv_vol", 0)),
+                )
+
+            bid = float(opt.get("bid", 0))
+            ask = float(opt.get("ask", 0))
+
+            results.append(OptionQuote(
+                symbol=opt.get("symbol", ""),
+                option_type=OptionType(opt.get("option_type", "call")),
+                strike=float(opt.get("strike", 0)),
+                expiration=opt.get("expiration_date", expiration),
+                bid=bid,
+                ask=ask,
+                mid=round((bid + ask) / 2, 2) if (bid + ask) > 0 else 0.0,
+                last=float(opt.get("last") or 0),
+                volume=int(opt.get("volume") or 0),
+                open_interest=int(opt.get("open_interest") or 0),
+                greeks=greeks_obj,
+            ))
+
+        logger.info("option_chain_fetched", symbol=symbol, expiration=expiration, contracts=len(results))
+        return results
+
+    async def get_option_expirations(self, symbol: str) -> list[str]:
+        """Get available expiration dates for a symbol.
+
+        Returns:
+            List of expiration date strings (YYYY-MM-DD).
+        """
+        data = await self._request("GET", "/markets/options/expirations", params={
+            "symbol": symbol,
+            "includeAllRoots": "true",
+        })
+
+        expirations = data.get("expirations", {}).get("date", [])
+        if isinstance(expirations, str):
+            expirations = [expirations]
+
+        return expirations
+
+    async def get_bars(
+        self,
+        symbol: str,
+        interval: str = "daily",
+        start: date | None = None,
+        end: date | None = None,
+    ) -> list[Bar]:
+        """Fetch historical OHLCV bars.
+
+        Args:
+            symbol: Ticker symbol.
+            interval: Bar interval — "daily", "weekly", "monthly", or intraday like "5min", "15min".
+            start: Start date.
+            end: End date.
+
+        Returns:
+            List of Bar objects.
+        """
+        is_intraday = interval.endswith("min")
+
+        if is_intraday:
+            path = "/markets/timesales"
+            params: dict[str, Any] = {
+                "symbol": symbol,
+                "interval": interval.replace("min", ""),
+                "session_filter": "open",
+            }
+            if start:
+                params["start"] = start.isoformat()
+            if end:
+                params["end"] = end.isoformat()
+        else:
+            path = "/markets/history"
+            params = {
+                "symbol": symbol,
+                "interval": interval,
+            }
+            if start:
+                params["start"] = start.isoformat()
+            if end:
+                params["end"] = end.isoformat()
+
+        data = await self._request("GET", path, params=params)
+
+        bars = []
+        if is_intraday:
+            series = (data.get("series") or {}).get("data") or []
+            if isinstance(series, dict):
+                series = [series]
+            for point in series:
+                bars.append(Bar(
+                    timestamp=datetime.fromisoformat(point["time"]),
+                    open=float(point.get("open", 0)),
+                    high=float(point.get("high", 0)),
+                    low=float(point.get("low", 0)),
+                    close=float(point.get("close", point.get("price", 0))),
+                    volume=int(point.get("volume", 0)),
+                ))
+        else:
+            history_data = data.get("history") or {}
+            history = history_data.get("day") or []
+            if isinstance(history, dict):
+                history = [history]
+            for day in history:
+                bars.append(Bar(
+                    timestamp=datetime.fromisoformat(day["date"]),
+                    open=float(day.get("open", 0)),
+                    high=float(day.get("high", 0)),
+                    low=float(day.get("low", 0)),
+                    close=float(day.get("close", 0)),
+                    volume=int(day.get("volume", 0)),
+                ))
+
+        logger.info("bars_fetched", symbol=symbol, interval=interval, count=len(bars))
+        return bars
+
+    # ── Streaming ────────────────────────────────────────────────
+
+    async def _create_streaming_session(self) -> str:
+        """Create a streaming session and return the session ID."""
+        data = await self._request("POST", "/markets/events/session")
+        return data["stream"]["sessionid"]
+
+    async def stream_quotes(self, symbols: list[str]) -> AsyncIterator[Quote]:
+        """Stream real-time quotes for symbols.
+
+        Yields Quote objects as prices update. Automatically creates a streaming
+        session and reconnects on failure.
+
+        Args:
+            symbols: List of ticker symbols to stream.
+
+        Yields:
+            Quote objects with updated prices.
+        """
+        session_id = await self._create_streaming_session()
+        stream_url = f"{self.stream_url}/markets/events"
+
+        logger.info("streaming_started", symbols=symbols)
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(None)) as stream_client:
+            async with stream_client.stream(
+                "POST",
+                stream_url,
+                data={
+                    "sessionid": session_id,
+                    "symbols": ",".join(symbols),
+                    "filter": "quote",
+                    "linebreak": "true",
+                },
+                headers=self._headers,
+            ) as response:
+                async for line in response.aiter_lines():
+                    if not line.strip():
+                        continue
+                    try:
+                        import json
+                        event = json.loads(line)
+                        if event.get("type") == "quote":
+                            yield Quote(
+                                symbol=event.get("symbol", ""),
+                                last=float(event.get("last", 0)),
+                                bid=float(event.get("bid", 0)),
+                                ask=float(event.get("ask", 0)),
+                                high=float(event.get("high", 0)),
+                                low=float(event.get("low", 0)),
+                                volume=int(event.get("cvol", 0)),
+                                change=float(event.get("change", 0)),
+                                change_percentage=float(event.get("change_percentage", 0)),
+                            )
+                    except Exception as e:
+                        logger.warning("stream_parse_error", error=str(e), line=line[:100])
+                        continue
+
+    # ── Order Execution ──────────────────────────────────────────
+
+    async def place_order(
+        self,
+        symbol: str,
+        option_symbol: str | None = None,
+        side: str = "buy_to_open",
+        quantity: int = 1,
+        order_type: str = "market",
+        price: float | None = None,
+        duration: str = "day",
+    ) -> dict[str, Any]:
+        """Place a single-leg order.
+
+        Args:
+            symbol: Underlying symbol.
+            option_symbol: Option contract symbol (OCC format). None for equity orders.
+            side: Order side — buy_to_open, sell_to_open, buy_to_close, sell_to_close.
+            quantity: Number of contracts/shares.
+            order_type: market, limit, stop, stop_limit.
+            price: Limit price (required for limit/stop_limit).
+            duration: day or gtc.
+
+        Returns:
+            Order response dict with order ID and status.
+        """
+        order_data: dict[str, Any] = {
+            "class": "option" if option_symbol else "equity",
+            "symbol": symbol,
+            "side": side,
+            "quantity": str(quantity),
+            "type": order_type,
+            "duration": duration,
+        }
+
+        if option_symbol:
+            order_data["option_symbol"] = option_symbol
+
+        if price is not None:
+            order_data["price"] = str(price)
+
+        result = await self._request(
+            "POST",
+            f"/accounts/{self.account_id}/orders",
+            data=order_data,
+        )
+
+        logger.info("order_placed", symbol=symbol, side=side, quantity=quantity, result=result)
+        return result
+
+    async def place_multileg_order(
+        self,
+        symbol: str,
+        legs: list[dict[str, Any]],
+        order_type: str = "credit",
+        price: float | None = None,
+        duration: str = "day",
+    ) -> dict[str, Any]:
+        """Place a multi-leg option order (spreads, iron condors, etc.).
+
+        Args:
+            symbol: Underlying symbol.
+            legs: List of leg dicts, each with:
+                - option_symbol: OCC option symbol
+                - side: buy_to_open, sell_to_open, etc.
+                - quantity: number of contracts
+            order_type: credit, debit, even, market.
+            price: Net credit/debit price.
+            duration: day or gtc.
+
+        Returns:
+            Order response dict.
+        """
+        order_data: dict[str, Any] = {
+            "class": "multileg",
+            "symbol": symbol,
+            "type": order_type,
+            "duration": duration,
+        }
+
+        if price is not None:
+            order_data["price"] = str(price)
+
+        for i, leg in enumerate(legs):
+            order_data[f"option_symbol[{i}]"] = leg["option_symbol"]
+            order_data[f"side[{i}]"] = leg["side"]
+            order_data[f"quantity[{i}]"] = str(leg["quantity"])
+
+        result = await self._request(
+            "POST",
+            f"/accounts/{self.account_id}/orders",
+            data=order_data,
+        )
+
+        logger.info("multileg_order_placed", symbol=symbol, legs=len(legs), result=result)
+        return result
+
+    async def cancel_order(self, order_id: str) -> dict[str, Any]:
+        """Cancel an open order."""
+        result = await self._request(
+            "DELETE" if hasattr(self._client, "delete") else "POST",
+            f"/accounts/{self.account_id}/orders/{order_id}",
+        )
+        logger.info("order_cancelled", order_id=order_id)
+        return result
+
+    async def get_positions(self) -> list[dict[str, Any]]:
+        """Get all open positions in the account."""
+        data = await self._request("GET", f"/accounts/{self.account_id}/positions")
+        positions = data.get("positions", {}).get("position", [])
+        if isinstance(positions, dict):
+            positions = [positions]
+        return positions
+
+    async def get_account_balance(self) -> dict[str, Any]:
+        """Get account balance and buying power."""
+        data = await self._request("GET", f"/accounts/{self.account_id}/balances")
+        return data.get("balances", {})

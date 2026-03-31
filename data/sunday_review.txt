@@ -1,0 +1,82 @@
+⚡ ESTHER SUNDAY NIGHT REVIEW — Week of Mar 30
+==================================================
+
+📊 SPY FRIDAY FLOW:
+  Volume: 6,387,228 calls / 8,670,259 puts
+  Premium: $1.62B calls / $4.62B puts (2.9x bearish)
+  Bullish: $2.92B | Bearish: $2.82B
+  Net Call Prem: $31,827,445 | Net Put Prem: $-101,519,917
+
+🎯 MAX PAIN: SPY $653 (current $634 = $19 below)
+
+🚨 SPY FLOW:
+  CALL 6480 exp 2026-03-30 — $112,180  vol/OI: 20.0857142857143
+  CALL 6450 exp 2026-03-30 — $173,680  vol/OI: 79.2698412698413
+  PUT 5975 exp 2026-05-15 — $342,510  vol/OI: 0.0417877094972067
+
+🚨 SPXW FLOW:
+  CALL 6480 exp 2026-03-30 — $112,180  vol/OI: 20.0857142857143
+  CALL 6450 exp 2026-03-30 — $173,680  vol/OI: 79.2698412698413
+  PUT 5975 exp 2026-05-15 — $342,510  vol/OI: 0.0417877094972067
+
+🚨 QQQ FLOW:
+  CALL 6480 exp 2026-03-30 — $112,180  vol/OI: 20.0857142857143
+  CALL 6450 exp 2026-03-30 — $173,680  vol/OI: 79.2698412698413
+  PUT 5975 exp 2026-05-15 — $342,510  vol/OI: 0.0417877094972067
+
+🚨 NVDA FLOW:
+  CALL 6480 exp 2026-03-30 — $112,180  vol/OI: 20.0857142857143
+  CALL 6450 exp 2026-03-30 — $173,680  vol/OI: 79.2698412698413
+  PUT 5975 exp 2026-05-15 — $342,510  vol/OI: 0.0417877094972067
+
+🚨 TSLA FLOW:
+  CALL 6480 exp 2026-03-30 — $112,180  vol/OI: 20.0857142857143
+  CALL 6450 exp 2026-03-30 — $173,680  vol/OI: 79.2698412698413
+  PUT 5975 exp 2026-05-15 — $342,510  vol/OI: 0.0417877094972067
+
+🚨 AAPL FLOW:
+  CALL 6480 exp 2026-03-30 — $112,180  vol/OI: 20.0857142857143
+  CALL 6450 exp 2026-03-30 — $173,680  vol/OI: 79.2698412698413
+  PUT 5975 exp 2026-05-15 — $342,510  vol/OI: 0.0417877094972067
+
+🚨 AMD FLOW:
+  CALL 6480 exp 2026-03-30 — $112,180  vol/OI: 20.0857142857143
+  CALL 6450 exp 2026-03-30 — $173,680  vol/OI: 79.2698412698413
+  PUT 5975 exp 2026-05-15 — $342,510  vol/OI: 0.0417877094972067
+
+🚨 META FLOW:
+  CALL 6480 exp 2026-03-30 — $112,180  vol/OI: 20.0857142857143
+  CALL 6450 exp 2026-03-30 — $173,680  vol/OI: 79.2698412698413
+  PUT 5975 exp 2026-05-15 — $342,510  vol/OI: 0.0417877094972067
+
+🌑 DARK POOL (top blocks):
+  NVDA — 704 shares @ $166.6 = $117,286
+  SNDK — 255 shares @ $610.0013 = $155,550
+  TSLA — 500 shares @ $360.487 = $180,244
+  BABA — 900 shares @ $122.19 = $109,971
+  CRDO — 1500 shares @ $94.21 = $141,315
+  APP — 840 shares @ $377.9499 = $317,478
+  APP — 840 shares @ $377.95 = $317,478
+
+📐 GREEK EXPOSURE:
+  Net Delta: -235,978,620 (BEARISH)
+  Put delta 4.1x larger than call delta
+
+🎯 MONDAY GAME PLAN:
+  SPY close: $634.09 | VIX: 31.05 🟡
+  Expected move: ±$20 SPY / ±110 SPX
+  SPY range: $614 — $653
+  SPX range: $6,259 — $6,479
+
+  📍 IC STRIKES (sell outside expected range):
+    Calls: ABOVE 6480 SPX / 653 SPY
+    Puts: BELOW 6260 SPX / 614 SPY
+
+  📍 TUESDAY CATALYST: Window Dressing (Q1 end)
+    Fund managers must buy → potential rally
+    P4 runner opportunity if dip Monday
+
+  📍 FRIDAY: Market CLOSED (Good Friday)
+    Close all positions by Thursday EOD
+
+  ⚠️ NFP this week — reduce size 50% on release day

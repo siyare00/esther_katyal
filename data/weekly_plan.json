@@ -1,0 +1,45 @@
+{
+  "week_of": "2026-03-30",
+  "source": "@SuperLuckeee 3/29/26 8:14-8:17 PM",
+  "generated_at": "2026-03-29T20:25:00-04:00",
+
+  "monday_mar_30": {
+    "implied_move": {
+      "spy_points": 20,
+      "spx_points": 110,
+      "spy_range_low": 614.0,
+      "spy_range_high": 653.0,
+      "spx_range_low": 6258.86,
+      "spx_range_high": 6478.84
+    },
+    "ic_strikes": {
+      "spy_call_above": 653,
+      "spy_put_below": 614,
+      "spx_call_above": 6480,
+      "spx_put_below": 6260
+    },
+    "notes": "NFP week, expect massive volatility. Sell outside expected range."
+  },
+
+  "tuesday_mar_31": {
+    "catalyst": "WINDOW DRESSING — end of Q1",
+    "bias": "BULLISH — fund managers buying to dress up quarterly reports",
+    "opportunity": "Potential massive rally. P4 runner mode for 1000-2000% calls.",
+    "notes": "SuperLuckeee: 'could be a massive rally for 1000%-2000% winners'"
+  },
+
+  "friday_apr_3": {
+    "market_status": "CLOSED — Good Friday",
+    "notes": "No trading. Positions must be closed by Thursday EOD."
+  },
+
+  "week_events": [
+    {"event": "NFP", "impact": "massive volatility", "day": "this_week"},
+    {"event": "Window Dressing", "impact": "bullish Q1 close", "day": "tuesday"},
+    {"event": "Good Friday", "impact": "market closed", "day": "friday"}
+  ],
+
+  "vix_current": 31.05,
+  "spy_close_friday": 634.09,
+  "spx_close_friday": 6368.85
+}

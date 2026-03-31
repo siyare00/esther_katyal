@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+
+# Environment
+.env
+.env.*
+
+# Logs
+logs/*.log
+
+# Data (state files, journals — keep structure)
+data/inversion_state*.json
+data/journal/*.jsonl
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+build_v3.py

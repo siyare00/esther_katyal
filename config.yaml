@@ -1,0 +1,190 @@
+# Esther Trading Configuration
+# All configurable parameters — nothing hardcoded in the code
+
+tickers:
+  tier1:
+    symbols: ["SPY", "QQQ", "IWM"]  # SPX/XSP removed — Alpaca doesn't support index options
+    expiry: "0dte"
+    pillars: [1, 2, 3, 4, 5]
+  tier2:
+    symbols: ["GLD", "SLV", "USO", "TLT"]
+    expiry: "0dte"
+    pillars: [1, 2, 3, 4, 5]
+  tier3:
+    symbols: ["NVDA", "TSLA", "AAPL", "AMZN"]
+    expiry: "0dte"
+    pillars: [1, 2, 3, 4, 5]
+
+# Bias Engine
+bias:
+  weights:
+    vwap: 0.15
+    ema_cross: 0.10
+    rsi: 0.10
+    vix: 0.10
+    price_action: 0.10
+    flow: 0.25
+    regime: 0.10
+    levels: 0.10
+  pillar_ranges:
+    p1_low: -35        # ICs work in wider range — VIX 30 = IC sweet spot
+    p1_high: 35
+    p2_threshold: -25   # Bear calls activate earlier — bearish is bearish
+    p3_threshold: 25    # Bull puts activate earlier
+    p4_threshold: 25    # Scalps fire more often — paper mode, let it rip
+    p5_threshold: 30    # Butterflies at moderate conviction
+  ema:
+    fast: 9
+    slow: 21
+  rsi:
+    period: 14
+    overbought: 70
+    oversold: 30
+
+# Black Swan Detector
+black_swan:
+  vix_red: 35
+  vix_yellow: 25
+  spx_drop_red: -3.0      # percent
+  spx_drop_yellow: -1.5   # percent
+  volume_std_threshold: 3.0
+
+# Quality Filter
+quality:
+  max_spread_pct: 0.20    # reject if bid-ask spread > 20% of mid
+  min_volume:
+    tier1: 500
+    tier2: 100
+    tier3: 200
+  iv_rank:
+    spread_min: 20
+    spread_max: 80
+    iron_condor_min: 25         # lowered — VIX 30 IS high IV, let ICs trade
+
+# Pillar Execution
+pillars:
+  p1:  # Iron Condors — take profit FAST
+    short_delta: 0.12           # further OTM = higher win rate (was 0.16)
+    wing_width: 10
+    profit_target_pct: 0.75     # take 75% profit
+    stop_loss_multiplier: 1.5   # cut at 1.5x credit (was 2.0x)
+    expire_worthless: true
+  p2:  # Bear Call Spreads
+    short_delta: 0.20           # slightly further OTM (was 0.25)
+    wing_width: 10
+    profit_target_pct: 0.75     # take 75% profit
+    stop_loss_multiplier: 1.5
+  p3:  # Bull Put Spreads
+    short_delta: 0.20
+    wing_width: 10
+    profit_target_pct: 0.75
+    stop_loss_multiplier: 1.5
+  p4:  # 0DTE Directional Scalps — TIGHT STOPS
+    delta_range: [0.40, 0.55]
+    initial_trail_pct: 0.10       # 10% trail from entry (was 20% — too loose)
+    tight_trail_pct: 0.05         # 5% after profit (was 10%)
+    tighten_after_gain_pct: 0.25  # tighten sooner — after 25% gain (was 50%)
+    tiered_stops: true
+    stop_tiers: 3
+    stop_loss_multiplier: 1.5     # max loss = 1.5x entry (was 2.0x)
+  p5:  # Butterfly Spreads (small accounts)
+    wing_width_etf: 5       # SPY/QQQ wing width
+    wing_width_index: 10    # SPX wing width
+    profit_target_pct: 1.00  # 100% — double your money
+    stop_loss_pct: 0.50      # cut at 50% loss of debit
+
+# Risk Management — PAPER MODE: NO LIMITS
+risk:
+  max_positions:
+    tier1: 20
+    tier2: 10
+    tier3: 10
+  daily_loss_cap_pct: 1.00    # 100% — no kill-switch on paper
+  max_risk_per_ticker_pct: 0.50  # 50% per ticker on paper
+  cooldown_consecutive_losses: 0
+  cooldown_minutes: 0
+
+# Inversion Engine — INVERT ON EVERY LOSS
+inversion:
+  consecutive_loss_trigger: 1   # flip on first loss
+  state_file: "data/inversion_state.json"
+
+# Position Management
+positions:
+  eod_close_minutes_before: 15   # close P1-P3 at 3:45 PM ET
+
+# AI Debate
+ai:
+  model: "claude-sonnet-4-20250514"
+  max_tokens: 1024
+  temperature: 0.7
+
+# Sizing — Configured for $10K/day target with compounding
+sizing:
+  kelly_fraction: 0.50         # half-Kelly — aggressive on paper
+  min_contracts: 50            # minimum 50 contracts per trade
+  max_contracts: 200           # scale to 200 contracts
+  win_streak_multiplier: 1.30  # 30% compound after each win
+  loss_streak_divisor: 1.0     # don't reduce on loss — just invert
+
+# Engine Schedule
+engine:
+  scan_interval_seconds: 60    # scan every 1 min — faster entries
+  market_open: "09:30"
+  market_close: "16:00"
+  pre_market_scan: "09:15"
+  eod_cleanup: "15:50"
+  first_trade_after: "09:35"   # trade from open — catch opening moves
+  max_trades_per_day: 50       # no limit on paper
+
+# Daily Target & Compounding Strategy
+# Phase 1: $80K → $200K (4-6 weeks) — 60 spreads, ~$5-7K/day
+# Phase 2: $200K → $500K (6-8 weeks) — 100 spreads, $10K+/day
+# Phase 3: $500K+ — 200 spreads, $15-25K/day, start taking profits
+daily_targets:
+  target_daily_pnl: 10000      # $10K/day goal
+  compound_mode: true           # reinvest ALL profits until Phase 2
+  take_profit_threshold: 200000 # after $200K, take 30% of daily profits out
+  take_profit_pct: 0.30         # withdraw 30% of daily profits above threshold
+  max_daily_trades: 50          # no limit on paper
+  preferred_strategy: "ic_ladder"  # IC Ladder = highest win rate for daily bread
+
+# Logging
+logging:
+  level: "INFO"
+  file: "logs/esther.log"
+
+# --- NEW SECTIONS ---
+
+# Key Levels Tracking
+levels:
+  track_pm_low: true
+  track_prev_close: true
+  track_nwog: true
+  fibonacci_levels: [0.382, 0.500, 0.618]
+
+# Market Regime Detection (SMA crossover)
+regime:
+  sma_fast: 20
+  sma_slow: 50
+  lookback_days: 100
+
+# Order Flow Integration
+flow:
+  provider: "tradier"
+  min_premium: 100000        # $100K minimum flow to track
+
+# Economic Calendar
+calendar:
+  track_fomc: true
+  track_cpi: true
+  track_ppi: true
+  track_nfp: true
+  track_opex: true
+  reduce_size_on_event: 0.5  # 50% size on event days
+
+# Ladder (multiple ICs at different strikes)
+ladder:
+  enabled: true
+  max_rungs: 3             # up to 3 ICs at different strikes
+  size_by_direction: true   # size more on the side matching bias
