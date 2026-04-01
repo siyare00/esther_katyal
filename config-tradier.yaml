@@ -1,11 +1,19 @@
-# Esther Trading Configuration — Tradier (SPX/XSP Index Options)
-# Runs alongside Alpaca config for ETFs/stocks
+# Esther Trading Configuration — Tradier (All 12 Tickers)
+# Full ticker coverage: ETFs + Commodities/Bonds + Mega-cap + Index
 
 tickers:
   tier1:
-    symbols: ["SPX", "XSP"]
+    symbols: ["SPY", "QQQ", "IWM", "SPX"]
     expiry: "0dte"
-    pillars: [1, 2, 3, 4]
+    pillars: [1, 2, 3, 4, 5]
+  tier2:
+    symbols: ["GLD", "SLV", "USO", "TLT"]
+    expiry: "0dte"
+    pillars: [1, 2, 3, 4, 5]
+  tier3:
+    symbols: ["NVDA", "TSLA", "AAPL", "AMZN"]
+    expiry: "0dte"
+    pillars: [1, 2, 3, 4, 5]
 
 # Inherit everything else from defaults — only override what differs
 # Bias, quality, pillars, risk, AI, sizing all use same defaults
@@ -13,9 +21,9 @@ tickers:
 # Risk Management — separate budget for index trades
 risk:
   max_positions:
-    tier1: 10
-    tier2: 0
-    tier3: 0
+    tier1: 20
+    tier2: 10
+    tier3: 10
   daily_loss_cap_pct: 1.00      # no kill-switch on paper
   max_risk_per_ticker_pct: 0.75  # 75% — go big on paper
   cooldown_consecutive_losses: 0
