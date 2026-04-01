@@ -152,6 +152,11 @@ class AIConfig(BaseModel):
     model: str = "claude-sonnet-4-20250514"
     max_tokens: int = 1024
     temperature: float = 0.7
+    ai_backend: str = "ollama"  # "ollama", "groq", or "anthropic"
+    ollama_model: str = "qwen2.5-coder:7b"
+    ollama_base_url: str = "http://127.0.0.1:11434/v1"
+    groq_model: str = "llama-3.3-70b-versatile"
+    groq_api_key: str = ""  # Set via GROQ_API_KEY env or config
 
 
 class SizingConfig(BaseModel):

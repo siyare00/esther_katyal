@@ -15,7 +15,10 @@ from __future__ import annotations
 
 from typing import Any
 
+import os
+
 import anthropic
+import openai
 import structlog
 from pydantic import BaseModel
 
@@ -68,7 +71,57 @@ class AISizer:
         self._cfg = config().sizing
         self._ai_cfg = config().ai
         self._env = env()
-        self._client = anthropic.AsyncAnthropic(api_key=self._env.anthropic_api_key)
+        self._backend = self._ai_cfg.ai_backend.lower()
+        if self._backend == "ollama":
+            self._client = openai.AsyncOpenAI(
+                base_url=self._ai_cfg.ollama_base_url,
+                api_key="ollama",
+            )
+        elif self._backend == "groq":
+            self._client = openai.AsyncOpenAI(
+                base_url="https://api.groq.com/openai/v1",
+                api_key=self._ai_cfg.groq_api_key or os.environ.get("GROQ_API_KEY", ""),
+            )
+        else:
+            self._client = anthropic.AsyncAnthropic(api_key=self._env.anthropic_api_key)
+
+    async def _chat(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+    ) -> str:
+        """Unified chat method that handles both Ollama (OpenAI) and Anthropic backends."""
+        _max_tokens = max_tokens or self._ai_cfg.max_tokens
+        _temperature = temperature if temperature is not None else self._ai_cfg.temperature
+        if self._backend == "ollama":
+            _model = self._ai_cfg.ollama_model
+        elif self._backend == "groq":
+            _model = self._ai_cfg.groq_model
+        else:
+            _model = self._ai_cfg.model
+
+        if self._backend == "ollama":
+            response = await self._client.chat.completions.create(
+                model=_model,
+                max_tokens=_max_tokens,
+                temperature=_temperature,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            )
+            return response.choices[0].message.content
+        else:
+            response = await self._client.messages.create(
+                model=_model,
+                max_tokens=_max_tokens,
+                temperature=_temperature,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            return response.content[0].text
 
     async def calculate_size(self, input_data: SizingInput) -> SizingResult:
         """Calculate optimal position size.
@@ -254,15 +307,12 @@ Be conservative — protecting capital is more important than maximizing returns
 High VIX (>25) = reduce size. Low confidence (<50) = reduce size. Long losing streak = reduce size.
 Only increase size when everything aligns: high confidence, moderate VIX, winning streak."""
 
-        response = await self._client.messages.create(
-            model=self._ai_cfg.model,
+        text = await self._chat(
+            system_prompt=system,
+            user_prompt=prompt,
             max_tokens=256,
             temperature=0.2,
-            system=system,
-            messages=[{"role": "user", "content": prompt}],
         )
-
-        text = response.content[0].text
         result: dict[str, Any] = {"adjustment": 1.0, "reasoning": ""}
 
         for line in text.strip().split("\n"):

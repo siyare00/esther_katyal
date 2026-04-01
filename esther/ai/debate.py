@@ -33,7 +33,10 @@ from __future__ import annotations
 
 from typing import Any
 
+import os
+
 import anthropic
+import openai
 import structlog
 from pydantic import BaseModel
 
@@ -255,7 +258,57 @@ class AIDebate:
     def __init__(self):
         self._cfg = config().ai
         self._env = env()
-        self._client = anthropic.AsyncAnthropic(api_key=self._env.anthropic_api_key)
+        self._backend = self._cfg.ai_backend.lower()
+        if self._backend == "ollama":
+            self._client = openai.AsyncOpenAI(
+                base_url=self._cfg.ollama_base_url,
+                api_key="ollama",
+            )
+        elif self._backend == "groq":
+            self._client = openai.AsyncOpenAI(
+                base_url="https://api.groq.com/openai/v1",
+                api_key=self._cfg.groq_api_key or os.environ.get("GROQ_API_KEY", ""),
+            )
+        else:
+            self._client = anthropic.AsyncAnthropic(api_key=self._env.anthropic_api_key)
+
+    async def _chat(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+    ) -> str:
+        """Unified chat method that handles both Ollama (OpenAI) and Anthropic backends."""
+        _max_tokens = max_tokens or self._cfg.max_tokens
+        _temperature = temperature if temperature is not None else self._cfg.temperature
+        if self._backend == "ollama":
+            _model = self._cfg.ollama_model
+        elif self._backend == "groq":
+            _model = self._cfg.groq_model
+        else:
+            _model = self._cfg.model
+
+        if self._backend == "ollama":
+            response = await self._client.chat.completions.create(
+                model=_model,
+                max_tokens=_max_tokens,
+                temperature=_temperature,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            )
+            return response.choices[0].message.content
+        else:
+            response = await self._client.messages.create(
+                model=_model,
+                max_tokens=_max_tokens,
+                temperature=_temperature,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            return response.content[0].text
 
     async def debate(self, input_data: DebateInput) -> DebateVerdict:
         """Run the legacy three-way debate (Riki → Abi → Kage).
@@ -581,20 +634,10 @@ class AIDebate:
             The argument text.
         """
         try:
-            response = await self._client.messages.create(
-                model=self._cfg.model,
-                max_tokens=self._cfg.max_tokens,
-                temperature=self._cfg.temperature,
-                system=system_prompt,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": f"Analyze this trade opportunity:\n\n{market_context}",
-                    }
-                ],
+            text = await self._chat(
+                system_prompt=system_prompt,
+                user_prompt=f"Analyze this trade opportunity:\n\n{market_context}",
             )
-
-            text = response.content[0].text
             logger.debug("debate_argument", role=role_name, length=len(text))
             return text
 
@@ -645,15 +688,12 @@ REASONING: [Your reasoning]
 KEY_FACTOR: [Single most important factor]"""
 
         try:
-            response = await self._client.messages.create(
-                model=self._cfg.model,
+            text = await self._chat(
+                system_prompt=KAGE_SYSTEM_PROMPT,
+                user_prompt=judge_prompt,
                 max_tokens=512,
-                temperature=0.3,  # Lower temp for more consistent judging
-                system=KAGE_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": judge_prompt}],
+                temperature=0.3,
             )
-
-            text = response.content[0].text
             logger.debug("debate_verdict", length=len(text))
             return text
 
@@ -707,15 +747,10 @@ CONFIDENCE: [0-100]
 KEY_CONCERN: [Single biggest risk the final judge MUST address]"""
 
         try:
-            response = await self._client.messages.create(
-                model=self._cfg.model,
-                max_tokens=self._cfg.max_tokens,
-                temperature=self._cfg.temperature,
-                system=KIMI_ADVOCATE_PROMPT,
-                messages=[{"role": "user", "content": challenge_prompt}],
+            text = await self._chat(
+                system_prompt=KIMI_ADVOCATE_PROMPT,
+                user_prompt=challenge_prompt,
             )
-
-            text = response.content[0].text
             logger.debug("kimi_challenge", length=len(text))
             return text
 
@@ -782,15 +817,12 @@ KEY_FACTOR: [Single most important factor]
 KIMI_RESPONSE: [Your response to Kimi's concern]"""
 
         try:
-            response = await self._client.messages.create(
-                model=self._cfg.model,
+            text = await self._chat(
+                system_prompt=KAGE_FULL_SYSTEM_PROMPT,
+                user_prompt=judge_prompt,
                 max_tokens=768,
                 temperature=0.3,
-                system=KAGE_FULL_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": judge_prompt}],
             )
-
-            text = response.content[0].text
             logger.debug("debate_full_verdict", length=len(text))
             return text
 
