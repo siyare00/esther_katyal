@@ -28,7 +28,7 @@ inversion:
 
 # Engine Schedule
 engine:
-  scan_interval_seconds: 60     # 1 min scans
+  scan_interval_seconds: 180    # 3 min scans — reduces Claude API calls
   market_open: "09:30"
   market_close: "16:00"
   pre_market_scan: "09:15"

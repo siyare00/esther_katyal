@@ -301,6 +301,87 @@ class TradeJournal:
                                 pass
         return entries
 
+    def get_lessons(self) -> str:
+        """Summarize patterns from recent trades for in-session learning.
+
+        Reads today's + recent entries and builds a brief text highlighting:
+        - Repeated losses on the same symbol/direction
+        - Streaks (winning or losing)
+        - Direction accuracy issues
+        - Any recurring bad-trade patterns
+
+        Returns:
+            A brief text suitable for including in debate context.
+        """
+        entries = self._load_recent_days(3)
+        if not entries:
+            return ""
+
+        lines: list[str] = []
+
+        # Group by symbol+direction for pattern detection
+        from collections import Counter, defaultdict
+        sym_dir_results: dict[str, list[bool]] = defaultdict(list)
+        sym_dir_pnl: dict[str, float] = defaultdict(float)
+        for e in entries:
+            key = f"{e.symbol} {e.direction}"
+            sym_dir_results[key].append(e.won)
+            sym_dir_pnl[key] += e.pnl
+
+        # Flag losing streaks (3+ consecutive losses same symbol+direction)
+        for key, results in sym_dir_results.items():
+            consecutive_losses = 0
+            max_streak = 0
+            for won in results:
+                if not won:
+                    consecutive_losses += 1
+                    max_streak = max(max_streak, consecutive_losses)
+                else:
+                    consecutive_losses = 0
+            if max_streak >= 3:
+                lines.append(f"⚠️ {key}: {max_streak} consecutive losses — consider avoiding or inverting")
+            elif max_streak >= 2:
+                total_losses = sum(1 for w in results if not w)
+                if total_losses >= 3:
+                    lines.append(f"⚠️ {key}: lost {total_losses}/{len(results)} recent trades (P&L: ${sym_dir_pnl[key]:+,.0f})")
+
+        # Overall direction accuracy today
+        today_entries = [e for e in entries if e.date == date.today().isoformat()]
+        if len(today_entries) >= 3:
+            today_wins = sum(1 for e in today_entries if e.won)
+            today_wr = today_wins / len(today_entries) * 100
+            if today_wr < 30:
+                lines.append(f"🔴 Today's win rate: {today_wr:.0f}% ({today_wins}/{len(today_entries)}) — direction reads are off")
+            elif today_wr < 50:
+                lines.append(f"🟡 Today's win rate: {today_wr:.0f}% ({today_wins}/{len(today_entries)}) — be selective")
+
+        # Bad trade patterns
+        bad_reasons: list[str] = []
+        for e in entries:
+            if e.is_bad_trade:
+                bad_reasons.extend(e.bad_reasons)
+        if bad_reasons:
+            reason_counts = Counter(bad_reasons).most_common(3)
+            for reason, count in reason_counts:
+                if count >= 2:
+                    lines.append(f"🔁 Recurring mistake: {reason} ({count}x)")
+
+        # Flow alignment check
+        flow_against_losses = [
+            e for e in entries
+            if not e.won and (
+                (e.direction == "BULL" and e.flow_bias < -15)
+                or (e.direction == "BEAR" and e.flow_bias > 15)
+            )
+        ]
+        if len(flow_against_losses) >= 2:
+            lines.append(f"📊 {len(flow_against_losses)} losses from trading AGAINST flow — respect the flow direction")
+
+        if not lines:
+            return ""
+
+        return "\n".join(lines)
+
     def daily_summary(self) -> str:
         """Generate a human-readable daily summary."""
         if not self._entries:

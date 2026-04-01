@@ -1193,7 +1193,7 @@ class PillarExecutor:
             if order.order_type in ("credit", "debit"):
                 alpaca_type = "limit"
 
-            alpaca_order = await self.client.place_multileg_order(
+            alpaca_order = await self.client.submit_multi_leg_order(
                 symbol=order.symbol,
                 legs=legs_data,
                 order_type=alpaca_type,

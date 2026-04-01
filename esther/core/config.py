@@ -140,6 +140,7 @@ class RiskConfig(BaseModel):
     max_risk_per_ticker_pct: float = 0.03  # 3% default, higher for index-only configs
     cooldown_consecutive_losses: int = 2
     cooldown_minutes: int = 30
+    max_positions_per_ticker: int = 2  # Prevent stacking 5+ positions in the same ticker
 
 
 class InversionConfig(BaseModel):

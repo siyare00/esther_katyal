@@ -40,6 +40,7 @@ from esther.execution.position_manager import PositionManager, Position, Positio
 from esther.risk.risk_manager import RiskManager
 from esther.risk.journal import TradeJournal, TradeEntry
 from esther.signals.reentry import ReentryGuard
+from esther.signals.sage import Sage
 
 logger = structlog.get_logger(__name__)
 
@@ -97,6 +98,8 @@ class EstherEngine:
         self._risk_mgr: RiskManager | None = None
         self._journal = TradeJournal()
         self._reentry = ReentryGuard(required_candles=2)
+        self._sage = Sage()
+        self._last_sage_scan: float = 0.0  # timestamp of last intraday sage scan
 
         # State
         self._running = False
@@ -109,6 +112,9 @@ class EstherEngine:
         # Win/loss streak tracking per symbol for the capital recycler
         self._streaks: dict[str, int] = {}  # symbol → current streak (+ wins, - losses)
         self._recent_results: dict[str, tuple[int, int]] = {}  # symbol → (wins, losses)
+
+        # Duplicate debate prevention: tracks "symbol:pillar" debated this scan cycle
+        self._debated_this_cycle: set[str] = set()
 
     # ── Lifecycle ────────────────────────────────────────────────
 
@@ -259,6 +265,13 @@ class EstherEngine:
         except Exception as e:
             logger.error("pre_market_swan_failed", error=str(e))
 
+        # Sage pre-market intelligence scan
+        try:
+            sage_intel = await self._sage.premarket_scan()
+            logger.info("sage_premarket_complete", brief_len=len(sage_intel.intel_brief))
+        except Exception as e:
+            logger.warning("sage_premarket_failed", error=str(e))
+
         # Log ticker universe
         total_symbols = sum(
             len(tc.symbols) for tc in self._cfg.tickers.values()
@@ -283,7 +296,22 @@ class EstherEngine:
                 if self._risk_mgr:
                     self._risk_mgr.record_trade_result(pos)
                 self._record_streak(pos)
+                # Feed result to inversion engine (same as mid-session close)
+                if self._inversion:
+                    self._inversion.record_result(TradeResult(
+                        symbol=pos.symbol,
+                        direction="bull" if pos.direction == "BULL" else "bear",
+                        pnl=pos.unrealized_pnl,
+                        won=pos.unrealized_pnl > 0,
+                    ))
             logger.info("eod_positions_closed", count=len(closed))
+
+        # Sage EOD scan
+        try:
+            sage_eod = await self._sage.eod_scan()
+            logger.info("sage_eod_complete", brief_len=len(sage_eod.intel_brief))
+        except Exception as e:
+            logger.warning("sage_eod_failed", error=str(e))
 
         # Place GTC overnight orders for tomorrow
         try:
@@ -319,7 +347,19 @@ class EstherEngine:
     async def _scan_cycle(self) -> None:
         """One full scan cycle: check swan, scan tickers by tier, manage positions."""
         self._scan_count += 1
+        self._debated_this_cycle.clear()
         logger.info("scan_cycle_start", cycle=self._scan_count)
+
+        # Step 0: Sage intraday scan (throttled — every 5 minutes)
+        import time as _time_mod
+        now_ts = _time_mod.time()
+        if now_ts - self._last_sage_scan >= 300:  # 5 minutes
+            try:
+                await self._sage.intraday_scan()
+                self._last_sage_scan = now_ts
+                logger.info("sage_intraday_scan_complete")
+            except Exception as e:
+                logger.warning("sage_intraday_scan_failed", error=str(e))
 
         # Step 1: Black Swan check
         try:
@@ -343,6 +383,14 @@ class EstherEngine:
                     if self._risk_mgr:
                         self._risk_mgr.record_trade_result(pos)
                     self._record_streak(pos)
+                    # Feed result to inversion engine
+                    if self._inversion:
+                        self._inversion.record_result(TradeResult(
+                            symbol=pos.symbol,
+                            direction="bull" if pos.direction == "BULL" else "bear",
+                            pnl=pos.unrealized_pnl,
+                            won=pos.unrealized_pnl > 0,
+                        ))
             return  # Skip rest of cycle
 
         # Step 2: Update existing positions (check profit targets, stops, trails)
@@ -455,13 +503,9 @@ class EstherEngine:
         vix_level = 20.0  # default
         if self._current_swan_status:
             vix_level = self._current_swan_status.vix
-        if vix_level == 0:
-            try:
-                vix_quotes = await self._client.get_quotes(["VIX"])
-                if vix_quotes:
-                    vix_level = vix_quotes[0].last
-            except Exception:
-                pass
+        if not vix_level or vix_level == 0:
+            vix_level = await self._fetch_vix()
+        log.info("vix_for_ticker", vix=vix_level, source="swan" if self._current_swan_status else "fetch/default")
 
         # ── 1b. Fetch Order Flow (Unusual Whales + Tradier fallback) ──
         flow_entries = None
@@ -616,6 +660,13 @@ class EstherEngine:
             log.info("quality_rejected", reasons=quality.reasons, score=quality.quality_score)
             return
 
+        # ── 6b. Duplicate Debate Prevention ──────────────────────
+        debate_key = f"{symbol}:{pillar}"
+        if debate_key in self._debated_this_cycle:
+            log.debug("debate_skipped_duplicate", key=debate_key)
+            return
+        self._debated_this_cycle.add(debate_key)
+
         # ── 7. AI Debate ─────────────────────────────────────────
         # Build debate input from available data
         closes = [b.close for b in bars]
@@ -641,6 +692,12 @@ class EstherEngine:
             except Exception:
                 flow_summary = f"Flow entries: {len(flow_entries)}, bias: {flow_bias:+.1f}"
 
+        # Get Sage's broader market intelligence for the debate
+        sage_intel = self._sage.get_intel_for_debate() or None
+
+        # Get journal lessons so agents learn from recent mistakes
+        journal_lessons = self._journal.get_lessons()
+
         debate_input = DebateInput(
             symbol=symbol,
             current_price=quote.last,
@@ -651,10 +708,12 @@ class EstherEngine:
             volume=quote.volume,
             flow_bias=flow_bias,
             flow_summary=flow_summary,
+            sage_intel=sage_intel if sage_intel else None,
+            journal_lessons=journal_lessons,
         )
 
         try:
-            verdict = await self._debate.debate(debate_input)
+            verdict = await self._debate.debate_with_kimi(debate_input)
         except Exception as e:
             log.error("debate_failed", error=str(e))
             return
@@ -723,6 +782,13 @@ class EstherEngine:
                 recycler_multiplier=1.0, reasoning="Sizing failed, defaulting to 1 contract",
             )
 
+        # ── Hard per-ticker limit (belt + suspenders) ────────────
+        existing_for_ticker = len(self._position_mgr.get_positions_for_symbol(symbol))
+        max_per_ticker = self._cfg.risk.max_positions_per_ticker
+        if existing_for_ticker >= max_per_ticker:
+            log.info("engine_ticker_limit_blocked", symbol=symbol, existing=existing_for_ticker, max=max_per_ticker)
+            return
+
         # ── Risk check with actual size ──────────────────────────
         total_max_risk = sizing.contracts * (order.max_loss if order.max_loss > 0 else order.net_price * 100)
 
@@ -778,6 +844,34 @@ class EstherEngine:
         )
 
     # ── Helper Methods ───────────────────────────────────────────
+
+    async def _fetch_vix(self) -> float:
+        """Fetch VIX level with fallback chain: Alpaca → Tradier live → default.
+
+        Returns a non-zero VIX value. Falls back to 20.0 if all sources fail.
+        """
+        # Try Alpaca first
+        try:
+            vix_quotes = await self._client.get_quotes(["VIX"])
+            if vix_quotes and vix_quotes[0].last > 0:
+                return vix_quotes[0].last
+        except Exception as e:
+            logger.debug("vix_alpaca_failed", error=str(e))
+
+        # Try Tradier live API as backup
+        try:
+            tradier_client = TradierClient(sandbox=False)
+            async with tradier_client as tc:
+                vix_quotes = await tc.get_quotes(["VIX"])
+                if vix_quotes and vix_quotes[0].last > 0:
+                    logger.info("vix_tradier_fallback", vix=vix_quotes[0].last)
+                    return vix_quotes[0].last
+        except Exception as e:
+            logger.debug("vix_tradier_failed", error=str(e))
+
+        # Last resort: safe default
+        logger.warning("vix_all_sources_failed", fallback=20.0)
+        return 20.0
 
     async def _get_expiration(self, symbol: str, expiry_type: str) -> str | None:
         """Get the appropriate expiration date for a ticker.
@@ -1007,6 +1101,15 @@ class EstherEngine:
 
         # Journal: record the trade with full context
         try:
+            # Pull Sage intel snapshot for flow context at close time
+            sage_data = self._sage.get_intel_for_debate() if self._sage.latest else {}
+            flow_bias_at_close = sage_data.get("flow_bias", 0.0) if sage_data else 0.0
+
+            # Extract debate context from position metadata if available
+            ai_confidence = getattr(position, "debate_confidence", 0)
+            ai_verdict = getattr(position, "ai_verdict", "")
+            bias_score_val = getattr(position, "bias_score", 0.0)
+
             entry = TradeEntry(
                 id=position.id,
                 date=date.today().isoformat(),
@@ -1015,13 +1118,17 @@ class EstherEngine:
                 pillar=position.pillar,
                 direction=direction,
                 entry_price=position.entry_price,
-                contracts=position.contracts,
+                contracts=position.quantity,
                 exit_price=position.current_value,
                 pnl=pnl,
-                pnl_pct=(pnl / (position.entry_price * position.contracts * 100) * 100) if position.entry_price > 0 and position.contracts > 0 else 0,
+                pnl_pct=(pnl / (position.entry_price * position.quantity * 100) * 100) if position.entry_price > 0 and position.quantity > 0 else 0,
                 exit_reason=position.status.value if hasattr(position.status, "value") else str(position.status),
                 won=won,
                 vix_level=self._current_swan_status.vix if self._current_swan_status else 0,
+                ai_confidence=ai_confidence,
+                ai_verdict=ai_verdict,
+                bias_score=bias_score_val,
+                flow_bias=flow_bias_at_close,
             )
             self._journal.record(entry)
         except Exception as e:

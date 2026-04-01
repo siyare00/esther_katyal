@@ -1,7 +1,7 @@
 """
 +======================================================================+
 |                      ESTHER TRADING BOT V4                            |
-|                Complete Source — 2026-03-30 19:47                    |
+|                Complete Source — 2026-03-31 16:18                    |
 |                                                                        |
 |  Autonomous SPX/SPY/QQQ Options Trading System                        |
 |  Based on @SuperLuckeee (Esther & Michael) strategies                 |
@@ -254,7 +254,7 @@ inversion:
 
 # Engine Schedule
 engine:
-  scan_interval_seconds: 60     # 1 min scans
+  scan_interval_seconds: 180    # 3 min scans — reduces Claude API calls
   market_open: "09:30"
   market_close: "16:00"
   pre_market_scan: "09:15"
@@ -299,7 +299,7 @@ logging:
 """
 
 # ======================================================================
-# FILE: esther/core/config.py (291 lines)
+# FILE: esther/core/config.py (292 lines)
 # ======================================================================
 
 """Configuration loader for Esther Trading.
@@ -444,6 +444,7 @@ class RiskConfig(BaseModel):
     max_risk_per_ticker_pct: float = 0.03  # 3% default, higher for index-only configs
     cooldown_consecutive_losses: int = 2
     cooldown_minutes: int = 30
+    max_positions_per_ticker: int = 2  # Prevent stacking 5+ positions in the same ticker
 
 
 class InversionConfig(BaseModel):
@@ -595,7 +596,7 @@ def env() -> EnvSettings:
 
 
 # ======================================================================
-# FILE: esther/core/engine.py (1153 lines)
+# FILE: esther/core/engine.py (1252 lines)
 # ======================================================================
 
 """Main Orchestrator Engine — The Brain of Esther.
@@ -640,6 +641,7 @@ from esther.execution.position_manager import PositionManager, Position, Positio
 from esther.risk.risk_manager import RiskManager
 from esther.risk.journal import TradeJournal, TradeEntry
 from esther.signals.reentry import ReentryGuard
+from esther.signals.sage import Sage
 
 logger = structlog.get_logger(__name__)
 
@@ -697,6 +699,8 @@ class EstherEngine:
         self._risk_mgr: RiskManager | None = None
         self._journal = TradeJournal()
         self._reentry = ReentryGuard(required_candles=2)
+        self._sage = Sage()
+        self._last_sage_scan: float = 0.0  # timestamp of last intraday sage scan
 
         # State
         self._running = False
@@ -709,6 +713,9 @@ class EstherEngine:
         # Win/loss streak tracking per symbol for the capital recycler
         self._streaks: dict[str, int] = {}  # symbol → current streak (+ wins, - losses)
         self._recent_results: dict[str, tuple[int, int]] = {}  # symbol → (wins, losses)
+
+        # Duplicate debate prevention: tracks "symbol:pillar" debated this scan cycle
+        self._debated_this_cycle: set[str] = set()
 
     # ── Lifecycle ────────────────────────────────────────────────
 
@@ -859,6 +866,13 @@ class EstherEngine:
         except Exception as e:
             logger.error("pre_market_swan_failed", error=str(e))
 
+        # Sage pre-market intelligence scan
+        try:
+            sage_intel = await self._sage.premarket_scan()
+            logger.info("sage_premarket_complete", brief_len=len(sage_intel.intel_brief))
+        except Exception as e:
+            logger.warning("sage_premarket_failed", error=str(e))
+
         # Log ticker universe
         total_symbols = sum(
             len(tc.symbols) for tc in self._cfg.tickers.values()
@@ -883,7 +897,22 @@ class EstherEngine:
                 if self._risk_mgr:
                     self._risk_mgr.record_trade_result(pos)
                 self._record_streak(pos)
+                # Feed result to inversion engine (same as mid-session close)
+                if self._inversion:
+                    self._inversion.record_result(TradeResult(
+                        symbol=pos.symbol,
+                        direction="bull" if pos.direction == "BULL" else "bear",
+                        pnl=pos.unrealized_pnl,
+                        won=pos.unrealized_pnl > 0,
+                    ))
             logger.info("eod_positions_closed", count=len(closed))
+
+        # Sage EOD scan
+        try:
+            sage_eod = await self._sage.eod_scan()
+            logger.info("sage_eod_complete", brief_len=len(sage_eod.intel_brief))
+        except Exception as e:
+            logger.warning("sage_eod_failed", error=str(e))
 
         # Place GTC overnight orders for tomorrow
         try:
@@ -919,7 +948,19 @@ class EstherEngine:
     async def _scan_cycle(self) -> None:
         """One full scan cycle: check swan, scan tickers by tier, manage positions."""
         self._scan_count += 1
+        self._debated_this_cycle.clear()
         logger.info("scan_cycle_start", cycle=self._scan_count)
+
+        # Step 0: Sage intraday scan (throttled — every 5 minutes)
+        import time as _time_mod
+        now_ts = _time_mod.time()
+        if now_ts - self._last_sage_scan >= 300:  # 5 minutes
+            try:
+                await self._sage.intraday_scan()
+                self._last_sage_scan = now_ts
+                logger.info("sage_intraday_scan_complete")
+            except Exception as e:
+                logger.warning("sage_intraday_scan_failed", error=str(e))
 
         # Step 1: Black Swan check
         try:
@@ -1055,13 +1096,9 @@ class EstherEngine:
         vix_level = 20.0  # default
         if self._current_swan_status:
             vix_level = self._current_swan_status.vix
-        if vix_level == 0:
-            try:
-                vix_quotes = await self._client.get_quotes(["VIX"])
-                if vix_quotes:
-                    vix_level = vix_quotes[0].last
-            except Exception:
-                pass
+        if not vix_level or vix_level == 0:
+            vix_level = await self._fetch_vix()
+        log.info("vix_for_ticker", vix=vix_level, source="swan" if self._current_swan_status else "fetch/default")
 
         # ── 1b. Fetch Order Flow (Unusual Whales + Tradier fallback) ──
         flow_entries = None
@@ -1216,6 +1253,13 @@ class EstherEngine:
             log.info("quality_rejected", reasons=quality.reasons, score=quality.quality_score)
             return
 
+        # ── 6b. Duplicate Debate Prevention ──────────────────────
+        debate_key = f"{symbol}:{pillar}"
+        if debate_key in self._debated_this_cycle:
+            log.debug("debate_skipped_duplicate", key=debate_key)
+            return
+        self._debated_this_cycle.add(debate_key)
+
         # ── 7. AI Debate ─────────────────────────────────────────
         # Build debate input from available data
         closes = [b.close for b in bars]
@@ -1241,6 +1285,12 @@ class EstherEngine:
             except Exception:
                 flow_summary = f"Flow entries: {len(flow_entries)}, bias: {flow_bias:+.1f}"
 
+        # Get Sage's broader market intelligence for the debate
+        sage_intel = self._sage.get_intel_for_debate() or None
+
+        # Get journal lessons so agents learn from recent mistakes
+        journal_lessons = self._journal.get_lessons()
+
         debate_input = DebateInput(
             symbol=symbol,
             current_price=quote.last,
@@ -1251,6 +1301,8 @@ class EstherEngine:
             volume=quote.volume,
             flow_bias=flow_bias,
             flow_summary=flow_summary,
+            sage_intel=sage_intel if sage_intel else None,
+            journal_lessons=journal_lessons,
         )
 
         try:
@@ -1323,6 +1375,13 @@ class EstherEngine:
                 recycler_multiplier=1.0, reasoning="Sizing failed, defaulting to 1 contract",
             )
 
+        # ── Hard per-ticker limit (belt + suspenders) ────────────
+        existing_for_ticker = len(self._position_mgr.get_positions_for_symbol(symbol))
+        max_per_ticker = self._cfg.risk.max_positions_per_ticker
+        if existing_for_ticker >= max_per_ticker:
+            log.info("engine_ticker_limit_blocked", symbol=symbol, existing=existing_for_ticker, max=max_per_ticker)
+            return
+
         # ── Risk check with actual size ──────────────────────────
         total_max_risk = sizing.contracts * (order.max_loss if order.max_loss > 0 else order.net_price * 100)
 
@@ -1378,6 +1437,34 @@ class EstherEngine:
         )
 
     # ── Helper Methods ───────────────────────────────────────────
+
+    async def _fetch_vix(self) -> float:
+        """Fetch VIX level with fallback chain: Alpaca → Tradier live → default.
+
+        Returns a non-zero VIX value. Falls back to 20.0 if all sources fail.
+        """
+        # Try Alpaca first
+        try:
+            vix_quotes = await self._client.get_quotes(["VIX"])
+            if vix_quotes and vix_quotes[0].last > 0:
+                return vix_quotes[0].last
+        except Exception as e:
+            logger.debug("vix_alpaca_failed", error=str(e))
+
+        # Try Tradier live API as backup
+        try:
+            tradier_client = TradierClient(sandbox=False)
+            async with tradier_client as tc:
+                vix_quotes = await tc.get_quotes(["VIX"])
+                if vix_quotes and vix_quotes[0].last > 0:
+                    logger.info("vix_tradier_fallback", vix=vix_quotes[0].last)
+                    return vix_quotes[0].last
+        except Exception as e:
+            logger.debug("vix_tradier_failed", error=str(e))
+
+        # Last resort: safe default
+        logger.warning("vix_all_sources_failed", fallback=20.0)
+        return 20.0
 
     async def _get_expiration(self, symbol: str, expiry_type: str) -> str | None:
         """Get the appropriate expiration date for a ticker.
@@ -1607,6 +1694,15 @@ class EstherEngine:
 
         # Journal: record the trade with full context
         try:
+            # Pull Sage intel snapshot for flow context at close time
+            sage_data = self._sage.get_intel_for_debate() if self._sage.latest else {}
+            flow_bias_at_close = sage_data.get("flow_bias", 0.0) if sage_data else 0.0
+
+            # Extract debate context from position metadata if available
+            ai_confidence = getattr(position, "confidence", 0)
+            ai_verdict = getattr(position, "ai_verdict", "")
+            bias_score = getattr(position, "bias_score", 0.0)
+
             entry = TradeEntry(
                 id=position.id,
                 date=date.today().isoformat(),
@@ -1622,6 +1718,10 @@ class EstherEngine:
                 exit_reason=position.status.value if hasattr(position.status, "value") else str(position.status),
                 won=won,
                 vix_level=self._current_swan_status.vix if self._current_swan_status else 0,
+                ai_confidence=ai_confidence,
+                ai_verdict=ai_verdict,
+                bias_score=bias_score,
+                flow_bias=flow_bias_at_close,
             )
             self._journal.record(entry)
         except Exception as e:
@@ -2322,7 +2422,7 @@ class TradierClient:
 
 
 # ======================================================================
-# FILE: esther/data/alpaca.py (855 lines)
+# FILE: esther/data/alpaca.py (944 lines)
 # ======================================================================
 
 """Alpaca Broker Client.
@@ -2829,6 +2929,95 @@ class AlpacaClient:
             status=order.status,
         )
         return order
+
+    async def submit_multi_leg_order(
+        self,
+        symbol: str,
+        legs: list[dict[str, Any]],
+        order_type: str = "limit",
+        net_price: float | None = None,
+        time_in_force: str = "day",
+    ) -> AlpacaOrder:
+        """Submit a multi-leg order with fallback to individual legs.
+
+        Tries the native mleg endpoint first. If it returns a 422 (common on
+        paper accounts that don't support multi-leg), falls back to submitting
+        each leg as a separate order.
+
+        Args:
+            symbol: Underlying symbol (e.g., "SPY").
+            legs: List of leg dicts with keys: symbol, side, qty.
+            order_type: "market", "limit", "debit", "credit".
+            net_price: Net credit/debit price for limit orders.
+            time_in_force: "day" or "gtc".
+
+        Returns:
+            AlpacaOrder from the multi-leg attempt, or the last individual
+            leg order if fallback was used.
+        """
+        try:
+            return await self.place_multileg_order(
+                symbol=symbol,
+                legs=legs,
+                order_type=order_type,
+                net_price=net_price,
+                time_in_force=time_in_force,
+            )
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 422:
+                logger.warning(
+                    "mleg_not_supported_falling_back",
+                    symbol=symbol,
+                    legs=len(legs),
+                    error=str(e),
+                )
+                return await self._submit_legs_individually(
+                    legs=legs,
+                    time_in_force=time_in_force,
+                )
+            raise
+        except Exception as e:
+            # Any other error on mleg — try individual legs as last resort
+            logger.warning(
+                "mleg_failed_falling_back",
+                symbol=symbol,
+                error=str(e),
+            )
+            return await self._submit_legs_individually(
+                legs=legs,
+                time_in_force=time_in_force,
+            )
+
+    async def _submit_legs_individually(
+        self,
+        legs: list[dict[str, Any]],
+        time_in_force: str = "day",
+    ) -> AlpacaOrder:
+        """Fallback: submit each leg of a spread as a separate market order.
+
+        NOTE: This is a workaround for paper accounts that don't support
+        order_class=mleg. Individual legs may not fill at the same time,
+        creating temporary naked risk.
+        """
+        last_order: AlpacaOrder | None = None
+        for leg in legs:
+            order = await self.place_order(
+                symbol=leg["symbol"],
+                side=leg["side"],
+                qty=int(leg.get("qty", leg.get("quantity", 1))),
+                order_type="market",
+                time_in_force=time_in_force,
+            )
+            last_order = order
+            logger.info(
+                "individual_leg_submitted",
+                symbol=leg["symbol"],
+                side=leg["side"],
+                order_id=order.id,
+                note="WORKAROUND: mleg not supported, legs submitted individually",
+            )
+        assert last_order is not None
+        return last_order
 
     # ── Positions ────────────────────────────────────────────────
 
@@ -10156,7 +10345,7 @@ class Sage:
 
 
 # ======================================================================
-# FILE: esther/ai/debate.py (838 lines)
+# FILE: esther/ai/debate.py (870 lines)
 # ======================================================================
 
 """AI Debate System — Four-Way Claude Debate for Trade Decisions.
@@ -10357,6 +10546,8 @@ class DebateInput(BaseModel):
     news_context: str = ""
     flow_bias: float = 0.0              # -100 (bearish flow) to +100 (bullish flow)
     flow_summary: str = ""              # Human-readable flow summary for debate context
+    sage_intel: dict | None = None      # Sage's market intelligence package
+    journal_lessons: str = ""           # Trade journal lessons for in-session learning
 
 
 class DebateVerdict(BaseModel):
@@ -10673,6 +10864,36 @@ class AIDebate:
             parts.append(f"FLOW DETAILS: {data.flow_summary}")
         if data.news_context:
             parts.append(f"NEWS CONTEXT: {data.news_context}")
+
+        # Sage's broader market intelligence
+        if data.sage_intel:
+            si = data.sage_intel
+            parts.append("")
+            parts.append("--- SAGE MARKET INTELLIGENCE ---")
+            if si.get("intel_brief"):
+                parts.append(si["intel_brief"])
+            else:
+                if si.get("flow_direction"):
+                    parts.append(f"MARKET FLOW: {si['flow_direction']} (bias {si.get('flow_bias', 0):+.1f})")
+                if si.get("put_call_ratio"):
+                    parts.append(f"SPY PUT/CALL RATIO: {si['put_call_ratio']:.2f}")
+                if si.get("max_pain"):
+                    parts.append(f"SPY MAX PAIN: ${si['max_pain']:.0f}")
+                if si.get("expected_move_spy"):
+                    parts.append(f"SPY EXPECTED MOVE: ±${si['expected_move_spy']:.0f} ({si.get('spy_range', '')})")
+                if si.get("net_delta"):
+                    parts.append(f"NET DELTA: {si['net_delta']:,.0f} ({si.get('net_delta_direction', '')})")
+                if si.get("is_event_day"):
+                    parts.append(f"⚠️ EVENT DAY: {si.get('event_name', 'unknown')}")
+                if si.get("risk_flags"):
+                    for flag in si["risk_flags"]:
+                        parts.append(f"  {flag}")
+
+        # Journal lessons — what we've learned from recent trades
+        if data.journal_lessons:
+            parts.append("")
+            parts.append("--- TRADE JOURNAL LESSONS (learn from these) ---")
+            parts.append(data.journal_lessons)
 
         return "\n".join(parts)
 
@@ -12481,7 +12702,7 @@ class PillarExecutor:
             if order.order_type in ("credit", "debit"):
                 alpaca_type = "limit"
 
-            alpaca_order = await self.client.place_multileg_order(
+            alpaca_order = await self.client.submit_multi_leg_order(
                 symbol=order.symbol,
                 legs=legs_data,
                 order_type=alpaca_type,
@@ -15267,7 +15488,7 @@ class LeapManager:
 
 
 # ======================================================================
-# FILE: esther/risk/risk_manager.py (913 lines)
+# FILE: esther/risk/risk_manager.py (933 lines)
 # ======================================================================
 
 """Risk Manager — Position Limits, Daily Loss Caps, PDT Mode, and Advanced Risk Rules.
@@ -15802,6 +16023,26 @@ class RiskManager:
                 account_tier=account_tier.tier_name,
             )
 
+        # Check 5b: Per-ticker position limit
+        ticker_positions_list = self.pm.get_positions_for_symbol(symbol)
+        ticker_positions = len(ticker_positions_list)
+        max_per_ticker = self._cfg.max_positions_per_ticker
+        logger.info(
+            "ticker_limit_check",
+            symbol=symbol,
+            ticker_positions=ticker_positions,
+            max_per_ticker=max_per_ticker,
+            position_ids=[p.id for p in ticker_positions_list],
+        )
+        if ticker_positions >= max_per_ticker and not is_scale_in:
+            return RiskCheck(
+                approved=False,
+                reason=f"TICKER_LIMIT: {symbol} already has {ticker_positions}/{max_per_ticker} positions",
+                current_positions=ticker_positions,
+                max_positions=max_per_ticker,
+                account_tier=account_tier.tier_name,
+            )
+
         # Check 6: Linear scaling — total spreads across all tiers
         total_positions = self.pm.get_position_count()
         max_spreads = account_tier.max_spreads
@@ -16185,7 +16426,7 @@ class RiskManager:
 
 
 # ======================================================================
-# FILE: esther/risk/journal.py (339 lines)
+# FILE: esther/risk/journal.py (420 lines)
 # ======================================================================
 
 """Trade Journal — Record Everything, Learn From It.
@@ -16490,6 +16731,87 @@ class TradeJournal:
                             except Exception:
                                 pass
         return entries
+
+    def get_lessons(self) -> str:
+        """Summarize patterns from recent trades for in-session learning.
+
+        Reads today's + recent entries and builds a brief text highlighting:
+        - Repeated losses on the same symbol/direction
+        - Streaks (winning or losing)
+        - Direction accuracy issues
+        - Any recurring bad-trade patterns
+
+        Returns:
+            A brief text suitable for including in debate context.
+        """
+        entries = self._load_recent_days(3)
+        if not entries:
+            return ""
+
+        lines: list[str] = []
+
+        # Group by symbol+direction for pattern detection
+        from collections import Counter, defaultdict
+        sym_dir_results: dict[str, list[bool]] = defaultdict(list)
+        sym_dir_pnl: dict[str, float] = defaultdict(float)
+        for e in entries:
+            key = f"{e.symbol} {e.direction}"
+            sym_dir_results[key].append(e.won)
+            sym_dir_pnl[key] += e.pnl
+
+        # Flag losing streaks (3+ consecutive losses same symbol+direction)
+        for key, results in sym_dir_results.items():
+            consecutive_losses = 0
+            max_streak = 0
+            for won in results:
+                if not won:
+                    consecutive_losses += 1
+                    max_streak = max(max_streak, consecutive_losses)
+                else:
+                    consecutive_losses = 0
+            if max_streak >= 3:
+                lines.append(f"⚠️ {key}: {max_streak} consecutive losses — consider avoiding or inverting")
+            elif max_streak >= 2:
+                total_losses = sum(1 for w in results if not w)
+                if total_losses >= 3:
+                    lines.append(f"⚠️ {key}: lost {total_losses}/{len(results)} recent trades (P&L: ${sym_dir_pnl[key]:+,.0f})")
+
+        # Overall direction accuracy today
+        today_entries = [e for e in entries if e.date == date.today().isoformat()]
+        if len(today_entries) >= 3:
+            today_wins = sum(1 for e in today_entries if e.won)
+            today_wr = today_wins / len(today_entries) * 100
+            if today_wr < 30:
+                lines.append(f"🔴 Today's win rate: {today_wr:.0f}% ({today_wins}/{len(today_entries)}) — direction reads are off")
+            elif today_wr < 50:
+                lines.append(f"🟡 Today's win rate: {today_wr:.0f}% ({today_wins}/{len(today_entries)}) — be selective")
+
+        # Bad trade patterns
+        bad_reasons: list[str] = []
+        for e in entries:
+            if e.is_bad_trade:
+                bad_reasons.extend(e.bad_reasons)
+        if bad_reasons:
+            reason_counts = Counter(bad_reasons).most_common(3)
+            for reason, count in reason_counts:
+                if count >= 2:
+                    lines.append(f"🔁 Recurring mistake: {reason} ({count}x)")
+
+        # Flow alignment check
+        flow_against_losses = [
+            e for e in entries
+            if not e.won and (
+                (e.direction == "BULL" and e.flow_bias < -15)
+                or (e.direction == "BEAR" and e.flow_bias > 15)
+            )
+        ]
+        if len(flow_against_losses) >= 2:
+            lines.append(f"📊 {len(flow_against_losses)} losses from trading AGAINST flow — respect the flow direction")
+
+        if not lines:
+            return ""
+
+        return "\n".join(lines)
 
     def daily_summary(self) -> str:
         """Generate a human-readable daily summary."""
@@ -21169,4 +21491,4 @@ Shawn already has an Esther bot built on Gemini (Google AI) running on Vultr VPS
 
 """
 
-# Total: 20972 lines across 34 files
+# Total: 21294 lines across 34 files

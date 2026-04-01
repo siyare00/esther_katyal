@@ -333,8 +333,9 @@ class RiskManager:
             # For credit spreads, risk = (stop_loss - entry) * 100 * quantity
             if pos.pillar in (1, 2, 3):
                 # Use the worst-case stop (widest tranche stop)
-                if pos.tranches:
-                    worst_stop = max(t.stop_price for t in pos.tranches if t.status.value == "ACTIVE")
+                active_tranches = [t for t in pos.tranches if t.status.value == "ACTIVE"]
+                if active_tranches:
+                    worst_stop = max(t.stop_price for t in active_tranches)
                 else:
                     worst_stop = pos.stop_loss
                 risk = (worst_stop - pos.average_entry_price) * 100 * pos.active_quantity
@@ -527,6 +528,26 @@ class RiskManager:
                 reason=f"POSITION_LIMIT: {tier} has {current_pos}/{max_pos} positions",
                 current_positions=current_pos,
                 max_positions=max_pos,
+                account_tier=account_tier.tier_name,
+            )
+
+        # Check 5b: Per-ticker position limit
+        ticker_positions_list = self.pm.get_positions_for_symbol(symbol)
+        ticker_positions = len(ticker_positions_list)
+        max_per_ticker = self._cfg.max_positions_per_ticker
+        logger.info(
+            "ticker_limit_check",
+            symbol=symbol,
+            ticker_positions=ticker_positions,
+            max_per_ticker=max_per_ticker,
+            position_ids=[p.id for p in ticker_positions_list],
+        )
+        if ticker_positions >= max_per_ticker and not is_scale_in:
+            return RiskCheck(
+                approved=False,
+                reason=f"TICKER_LIMIT: {symbol} already has {ticker_positions}/{max_per_ticker} positions",
+                current_positions=ticker_positions,
+                max_positions=max_per_ticker,
                 account_tier=account_tier.tier_name,
             )
 

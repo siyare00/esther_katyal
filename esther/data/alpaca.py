@@ -503,6 +503,95 @@ class AlpacaClient:
         )
         return order
 
+    async def submit_multi_leg_order(
+        self,
+        symbol: str,
+        legs: list[dict[str, Any]],
+        order_type: str = "limit",
+        net_price: float | None = None,
+        time_in_force: str = "day",
+    ) -> AlpacaOrder:
+        """Submit a multi-leg order with fallback to individual legs.
+
+        Tries the native mleg endpoint first. If it returns a 422 (common on
+        paper accounts that don't support multi-leg), falls back to submitting
+        each leg as a separate order.
+
+        Args:
+            symbol: Underlying symbol (e.g., "SPY").
+            legs: List of leg dicts with keys: symbol, side, qty.
+            order_type: "market", "limit", "debit", "credit".
+            net_price: Net credit/debit price for limit orders.
+            time_in_force: "day" or "gtc".
+
+        Returns:
+            AlpacaOrder from the multi-leg attempt, or the last individual
+            leg order if fallback was used.
+        """
+        try:
+            return await self.place_multileg_order(
+                symbol=symbol,
+                legs=legs,
+                order_type=order_type,
+                net_price=net_price,
+                time_in_force=time_in_force,
+            )
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 422:
+                logger.warning(
+                    "mleg_not_supported_falling_back",
+                    symbol=symbol,
+                    legs=len(legs),
+                    error=str(e),
+                )
+                return await self._submit_legs_individually(
+                    legs=legs,
+                    time_in_force=time_in_force,
+                )
+            raise
+        except Exception as e:
+            # Any other error on mleg — try individual legs as last resort
+            logger.warning(
+                "mleg_failed_falling_back",
+                symbol=symbol,
+                error=str(e),
+            )
+            return await self._submit_legs_individually(
+                legs=legs,
+                time_in_force=time_in_force,
+            )
+
+    async def _submit_legs_individually(
+        self,
+        legs: list[dict[str, Any]],
+        time_in_force: str = "day",
+    ) -> AlpacaOrder:
+        """Fallback: submit each leg of a spread as a separate market order.
+
+        NOTE: This is a workaround for paper accounts that don't support
+        order_class=mleg. Individual legs may not fill at the same time,
+        creating temporary naked risk.
+        """
+        last_order: AlpacaOrder | None = None
+        for leg in legs:
+            order = await self.place_order(
+                symbol=leg["symbol"],
+                side=leg["side"],
+                qty=int(leg.get("qty", leg.get("quantity", 1))),
+                order_type="market",
+                time_in_force=time_in_force,
+            )
+            last_order = order
+            logger.info(
+                "individual_leg_submitted",
+                symbol=leg["symbol"],
+                side=leg["side"],
+                order_id=order.id,
+                note="WORKAROUND: mleg not supported, legs submitted individually",
+            )
+        assert last_order is not None
+        return last_order
+
     # ── Positions ────────────────────────────────────────────────
 
     async def get_positions(self) -> list[AlpacaPosition]:

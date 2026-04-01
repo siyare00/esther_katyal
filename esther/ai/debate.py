@@ -196,6 +196,15 @@ class DebateInput(BaseModel):
     news_context: str = ""
     flow_bias: float = 0.0              # -100 (bearish flow) to +100 (bullish flow)
     flow_summary: str = ""              # Human-readable flow summary for debate context
+    sage_intel: dict | None = None      # Sage's market intelligence package
+    journal_lessons: str = ""           # Trade journal lessons for in-session learning
+
+    # Optional context fields (populated by engine, used by debate context builder)
+    pillar: int | None = None           # Which pillar strategy is being debated
+    direction: str = ""                 # BULL, BEAR, or NEUTRAL
+    tier: str = ""                      # tier1, tier2, tier3
+    option_quality_score: float | None = None  # Quality filter score
+    iv_rank: float | None = None        # Implied volatility rank (0-100)
 
 
 class DebateVerdict(BaseModel):
@@ -505,6 +514,16 @@ class AIDebate:
             parts.append(f"KEY SUPPORT: ${data.support_level:.2f}")
         if data.resistance_level is not None:
             parts.append(f"KEY RESISTANCE: ${data.resistance_level:.2f}")
+        if data.pillar is not None:
+            parts.append(f"PILLAR: P{data.pillar}")
+        if data.direction:
+            parts.append(f"PROPOSED DIRECTION: {data.direction}")
+        if data.tier:
+            parts.append(f"TIER: {data.tier}")
+        if data.iv_rank is not None:
+            parts.append(f"IV RANK: {data.iv_rank:.1f}")
+        if data.option_quality_score is not None:
+            parts.append(f"OPTION QUALITY SCORE: {data.option_quality_score:.1f}")
         if data.flow_bias != 0.0:
             flow_dir = "BULLISH" if data.flow_bias > 20 else "BEARISH" if data.flow_bias < -20 else "NEUTRAL"
             parts.append(f"INSTITUTIONAL FLOW BIAS: {data.flow_bias:+.1f} ({flow_dir})")
@@ -512,6 +531,36 @@ class AIDebate:
             parts.append(f"FLOW DETAILS: {data.flow_summary}")
         if data.news_context:
             parts.append(f"NEWS CONTEXT: {data.news_context}")
+
+        # Sage's broader market intelligence
+        if data.sage_intel:
+            si = data.sage_intel
+            parts.append("")
+            parts.append("--- SAGE MARKET INTELLIGENCE ---")
+            if si.get("intel_brief"):
+                parts.append(si["intel_brief"])
+            else:
+                if si.get("flow_direction"):
+                    parts.append(f"MARKET FLOW: {si['flow_direction']} (bias {si.get('flow_bias', 0):+.1f})")
+                if si.get("put_call_ratio"):
+                    parts.append(f"SPY PUT/CALL RATIO: {si['put_call_ratio']:.2f}")
+                if si.get("max_pain"):
+                    parts.append(f"SPY MAX PAIN: ${si['max_pain']:.0f}")
+                if si.get("expected_move_spy"):
+                    parts.append(f"SPY EXPECTED MOVE: ±${si['expected_move_spy']:.0f} ({si.get('spy_range', '')})")
+                if si.get("net_delta"):
+                    parts.append(f"NET DELTA: {si['net_delta']:,.0f} ({si.get('net_delta_direction', '')})")
+                if si.get("is_event_day"):
+                    parts.append(f"⚠️ EVENT DAY: {si.get('event_name', 'unknown')}")
+                if si.get("risk_flags"):
+                    for flag in si["risk_flags"]:
+                        parts.append(f"  {flag}")
+
+        # Journal lessons — what we've learned from recent trades
+        if data.journal_lessons:
+            parts.append("")
+            parts.append("--- TRADE JOURNAL LESSONS (learn from these) ---")
+            parts.append(data.journal_lessons)
 
         return "\n".join(parts)
 
