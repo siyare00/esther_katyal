@@ -70,9 +70,16 @@ ai:
   model: "claude-sonnet-4-20250514"
   max_tokens: 1024
   temperature: 0.7
-  ai_backend: "ollama"
-  ollama_model: "qwen2.5-coder:7b"
+  ai_backend: "groq"
+  ollama_model: "glm-4.7-flash:latest"
   ollama_base_url: "http://127.0.0.1:11434/v1"
+  groq_model: "llama-3.3-70b-versatile"
+  groq_fallback_models:
+    - "llama-3.1-8b-instant"
+    - "mixtral-8x7b-32768"
+  gemini_model: "gemini-2.5-flash"
+  gemini_fallback_models:
+    - "gemini-3-flash-preview"
 
 # Sizing — AGGRESSIVE for paper
 sizing:

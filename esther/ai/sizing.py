@@ -65,25 +65,100 @@ class AISizer:
     3. Capital Recycler adjusts based on recent streak
     4. AI reviews and can adjust ±30% based on qualitative assessment
     5. Final clamping to min/max contracts
+
+    Uses the same fallback chain as AIDebate — never stops on rate limits.
+    Priority: Groq (fast) → Anthropic (best) → Ollama (local).
     """
+
+    BACKEND_PRIORITY = ["groq", "gemini", "anthropic", "ollama"]
 
     def __init__(self):
         self._cfg = config().sizing
         self._ai_cfg = config().ai
         self._env = env()
-        self._backend = self._ai_cfg.ai_backend.lower()
-        if self._backend == "ollama":
-            self._client = openai.AsyncOpenAI(
-                base_url=self._ai_cfg.ollama_base_url,
-                api_key="ollama",
-            )
-        elif self._backend == "groq":
-            self._client = openai.AsyncOpenAI(
+        self._primary_backend = self._ai_cfg.ai_backend.lower()
+
+        # Build all available clients
+        self._clients: dict[str, Any] = {}
+        self._models: dict[str, str] = {}
+
+        # Groq — primary + fallback models
+        groq_key = self._ai_cfg.groq_api_key or os.environ.get("GROQ_API_KEY", "")
+        self._groq_models: list[str] = []
+        if groq_key:
+            self._clients["groq"] = openai.AsyncOpenAI(
                 base_url="https://api.groq.com/openai/v1",
-                api_key=self._ai_cfg.groq_api_key or os.environ.get("GROQ_API_KEY", ""),
+                api_key=groq_key,
             )
-        else:
-            self._client = anthropic.AsyncAnthropic(api_key=self._env.anthropic_api_key)
+            primary_groq = self._ai_cfg.groq_model or "llama-3.3-70b-versatile"
+            self._models["groq"] = primary_groq
+            self._groq_models = [primary_groq]
+            fallback_models = getattr(self._ai_cfg, "groq_fallback_models", None) or []
+            for m in fallback_models:
+                if m not in self._groq_models:
+                    self._groq_models.append(m)
+
+        # Gemini — OpenAI-compatible
+        gemini_key = self._ai_cfg.gemini_api_key or os.environ.get("GEMINI_API_KEY", "")
+        self._gemini_models: list[str] = []
+        if gemini_key:
+            self._clients["gemini"] = openai.AsyncOpenAI(
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+                api_key=gemini_key,
+            )
+            primary_gemini = self._ai_cfg.gemini_model or "gemini-2.5-flash"
+            self._models["gemini"] = primary_gemini
+            self._gemini_models = [primary_gemini]
+            gemini_fallbacks = getattr(self._ai_cfg, "gemini_fallback_models", None) or []
+            for m in gemini_fallbacks:
+                if m not in self._gemini_models:
+                    self._gemini_models.append(m)
+
+        anthropic_key = self._env.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+        if anthropic_key:
+            self._clients["anthropic"] = anthropic.AsyncAnthropic(api_key=anthropic_key)
+            self._models["anthropic"] = self._ai_cfg.model or "claude-sonnet-4-20250514"
+
+        self._clients["ollama"] = openai.AsyncOpenAI(
+            base_url=self._ai_cfg.ollama_base_url or "http://127.0.0.1:11434/v1",
+            api_key="ollama",
+        )
+        self._models["ollama"] = self._ai_cfg.ollama_model or "glm-4.7-flash:latest"
+
+        # Ordered fallback chain
+        self._fallback_chain = []
+        if self._primary_backend in self._clients:
+            self._fallback_chain.append(self._primary_backend)
+        for backend in self.BACKEND_PRIORITY:
+            if backend not in self._fallback_chain and backend in self._clients:
+                self._fallback_chain.append(backend)
+
+        self._backend = self._primary_backend
+        self._client = self._clients.get(self._primary_backend)
+
+        logger.info("ai_sizer_init",
+                     primary=self._primary_backend,
+                     fallback_chain=self._fallback_chain,
+                     groq_models=self._groq_models,
+                     gemini_models=self._gemini_models)
+
+    async def _call_openai_compat(self, client, model, system_prompt, user_prompt, max_tokens, temperature):
+        response = await client.chat.completions.create(
+            model=model, max_tokens=max_tokens, temperature=temperature,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        return response.choices[0].message.content
+
+    async def _call_anthropic(self, client, model, system_prompt, user_prompt, max_tokens, temperature):
+        response = await client.messages.create(
+            model=model, max_tokens=max_tokens, temperature=temperature,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        return response.content[0].text
 
     async def _chat(
         self,
@@ -92,36 +167,62 @@ class AISizer:
         max_tokens: int | None = None,
         temperature: float | None = None,
     ) -> str:
-        """Unified chat method that handles both Ollama (OpenAI) and Anthropic backends."""
+        """Chat with automatic fallback — cycles Groq models, then Anthropic, then Ollama."""
         _max_tokens = max_tokens or self._ai_cfg.max_tokens
         _temperature = temperature if temperature is not None else self._ai_cfg.temperature
-        if self._backend == "ollama":
-            _model = self._ai_cfg.ollama_model
-        elif self._backend == "groq":
-            _model = self._ai_cfg.groq_model
-        else:
-            _model = self._ai_cfg.model
+        last_error = None
 
-        if self._backend == "ollama":
-            response = await self._client.chat.completions.create(
-                model=_model,
-                max_tokens=_max_tokens,
-                temperature=_temperature,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-            )
-            return response.choices[0].message.content
-        else:
-            response = await self._client.messages.create(
-                model=_model,
-                max_tokens=_max_tokens,
-                temperature=_temperature,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}],
-            )
-            return response.content[0].text
+        for backend in self._fallback_chain:
+            client = self._clients[backend]
+
+            if backend == "groq":
+                for groq_model in self._groq_models:
+                    try:
+                        return await self._call_openai_compat(
+                            client, groq_model, system_prompt, user_prompt,
+                            _max_tokens, _temperature,
+                        )
+                    except Exception as e:
+                        logger.warning("ai_sizer_backend_failed",
+                                       backend=f"groq/{groq_model}", error=str(e)[:200])
+                        last_error = e
+                        continue
+            elif backend == "gemini":
+                for gemini_model in self._gemini_models:
+                    try:
+                        return await self._call_openai_compat(
+                            client, gemini_model, system_prompt, user_prompt,
+                            _max_tokens, _temperature,
+                        )
+                    except Exception as e:
+                        logger.warning("ai_sizer_backend_failed",
+                                       backend=f"gemini/{gemini_model}", error=str(e)[:200])
+                        last_error = e
+                        continue
+            elif backend == "anthropic":
+                try:
+                    return await self._call_anthropic(
+                        client, self._models[backend], system_prompt,
+                        user_prompt, _max_tokens, _temperature,
+                    )
+                except Exception as e:
+                    logger.warning("ai_sizer_backend_failed",
+                                   backend=backend, error=str(e)[:200])
+                    last_error = e
+                    continue
+            elif backend == "ollama":
+                try:
+                    return await self._call_openai_compat(
+                        client, self._models[backend], system_prompt,
+                        user_prompt, _max_tokens, _temperature,
+                    )
+                except Exception as e:
+                    logger.warning("ai_sizer_backend_failed",
+                                   backend=backend, error=str(e)[:200])
+                    last_error = e
+                    continue
+
+        raise RuntimeError(f"All AI backends failed for sizing. Last error: {last_error}")
 
     async def calculate_size(self, input_data: SizingInput) -> SizingResult:
         """Calculate optimal position size.

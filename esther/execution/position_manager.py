@@ -774,15 +774,22 @@ class PositionManager:
 
             is_short = leg["side"] in ("sell_to_open", "sell_to_close")
             sign = -1 if is_short else 1
+            ratio = leg["quantity"] / pos.quantity if pos.quantity > 0 else 1
 
-            total_value += mid * sign * leg["quantity"]
+            total_value += mid * sign * ratio
 
             # Aggregate Greeks if available
             if hasattr(quote, 'greeks') and quote.greeks:
-                total_delta += quote.greeks.delta * sign * leg["quantity"]
-                total_theta += quote.greeks.theta * sign * leg["quantity"]
-                total_gamma += quote.greeks.gamma * sign * leg["quantity"]
-                total_vega += quote.greeks.vega * sign * leg["quantity"]
+                total_delta += quote.greeks.delta * sign * ratio
+                total_theta += quote.greeks.theta * sign * ratio
+                total_gamma += quote.greeks.gamma * sign * ratio
+                total_vega += quote.greeks.vega * sign * ratio
+
+        # Normalize credit spreads to be positive values for easier logic
+        # If it's a credit spread (P1-P3), the natural total_value is negative (short > long).
+        # We invert it so a credit spread is worth +X, tracking its decay.
+        if pos.pillar in (1, 2, 3):
+            total_value = -total_value
 
         pos.current_value = round(total_value, 2)
         pos.delta = round(total_delta, 4)
