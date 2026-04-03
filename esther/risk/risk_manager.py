@@ -486,19 +486,11 @@ class RiskManager:
                 )
 
         # Check 3b: Recent loser — handled by ReentryGuard in engine (candle-based, not time-based)
-        # Kept as fallback: block if loss was < 5 min ago (absolute minimum)
+        # 180 Acrobat Flip: removing the 5-min fallback block to allow continuous inversion Flip 20x logic
         if symbol in self._recent_losers:
             loss_time = self._recent_losers[symbol]
             elapsed = (datetime.now() - loss_time).total_seconds() / 60
-            if elapsed < 5:
-                return RiskCheck(
-                    approved=False,
-                    reason=f"RECENT_LOSER: {symbol} lost {5 - elapsed:.0f}m ago, waiting for candle confirmation",
-                    daily_pnl=daily_pnl,
-                    daily_loss_cap=self.daily_loss_cap,
-                    account_tier=account_tier.tier_name,
-                )
-            elif elapsed > 60:
+            if elapsed > 60:
                 # Auto-expire after 1 hour regardless
                 del self._recent_losers[symbol]
 
@@ -507,7 +499,8 @@ class RiskManager:
             cooldown_info = self._cooldowns.get(symbol)
             if cooldown_info:
                 consecutive_losses, cooldown_until = cooldown_info
-                if cooldown_until and datetime.now() < cooldown_until:
+                # 180 Acrobat Flip 20x: Bypass time cooldowns so the inversion engine can continuously flip
+                if cooldown_until and datetime.now() < cooldown_until and False: # disabled
                     remaining = (cooldown_until - datetime.now()).total_seconds() / 60
                     return RiskCheck(
                         approved=False,

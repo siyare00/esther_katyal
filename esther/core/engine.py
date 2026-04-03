@@ -422,6 +422,11 @@ class EstherEngine:
             logger.warning("risk_shutdown_active", reason="daily limit hit")
             return
 
+        # Step 3b: FOMO Zone guard — No new trades before 10:00 AM ET (does not suppress 3 PM Power Hour)
+        now_et = datetime.now(ET)
+        if now_et.time() < time(10, 0):
+            return
+
         # Step 4: Process tickers by tier (Tier 1 first, then 2, then 3)
         tier_order = ["tier1", "tier2", "tier3"]
         for tier_name in tier_order:

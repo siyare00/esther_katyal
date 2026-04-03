@@ -76,7 +76,6 @@ ai:
   groq_model: "llama-3.3-70b-versatile"
   groq_fallback_models:
     - "llama-3.1-8b-instant"
-    - "mixtral-8x7b-32768"
   gemini_model: "gemini-2.5-flash"
   gemini_fallback_models:
     - "gemini-3-flash-preview"

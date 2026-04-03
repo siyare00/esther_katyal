@@ -365,16 +365,19 @@ class IFVGDetector:
             )
             return None
 
-        # Detect FVGs on both timeframes
-        fvgs_5m = self.detect_fvgs(bars_5m)
-        fvgs_1m = self.detect_fvgs(bars_1m)
+        try:
+            fvgs_5m = self.detect_fvgs(bars_5m)
+            fvgs_1m = self.detect_fvgs(bars_1m)
 
-        # Store active FVGs
-        self._active_fvgs[symbol] = fvgs_5m + fvgs_1m
+            # Store active FVGs
+            self._active_fvgs[symbol] = fvgs_5m + fvgs_1m
 
-        # Check for reversals
-        signal_5m = self.detect_ifvg_reversal(bars_5m, fvgs_5m)
-        signal_1m = self.detect_ifvg_reversal(bars_1m, fvgs_1m)
+            # Check for reversals
+            signal_5m = self.detect_ifvg_reversal(bars_5m, fvgs_5m)
+            signal_1m = self.detect_ifvg_reversal(bars_1m, fvgs_1m)
+        except Exception as e:
+            logger.error("ifvg_calculation_error_labyrinth", symbol=symbol, error=str(e), exc_info=True)
+            return None
 
         # Need at least one signal
         if signal_5m is None and signal_1m is None:

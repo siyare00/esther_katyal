@@ -525,19 +525,12 @@ class PositionManager:
                 if pos.pillar in (1, 2, 3) and pos.tranches:
                     tranche_closes = self._check_tiered_stops(pos)
                     if tranche_closes:
-                        for tranche in tranche_closes:
-                            await self._close_tranche(pos, tranche)
-
-                        # If all tranches are stopped, close the whole position
-                        if all(t.status == TrancheStatus.STOPPED for t in pos.tranches):
-                            pos.status = PositionStatus.CLOSED_TIERED_STOP
-                            pos.close_time = datetime.now()
-                            pos.close_reason = "ALL_TRANCHES_STOPPED"
-                            self._closed_positions.append(pos)
-                            if pos.id in self._positions:
-                                del self._positions[pos.id]
-                            closed_this_cycle.append(pos)
-                            continue
+                        # Zero Trust Protocol / 180 Acrobat Flip 20x:
+                        # Instead of partial tiered stops, close the entire position immediately 
+                        # on the first tranche stop to cleanly flip bias without state confusion.
+                        await self._close_position(pos, "180_ACROBAT_FLIP_FULL_STOP")
+                        closed_this_cycle.append(pos)
+                        continue
 
                 # Apply power hour management if applicable
                 if is_power_hour and pos.pillar == 4:
