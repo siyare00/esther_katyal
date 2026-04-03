@@ -297,10 +297,11 @@ class EstherEngine:
                     self._risk_mgr.record_trade_result(pos)
                 self._record_streak(pos)
                 # Feed result to inversion engine (same as mid-session close)
-                if self._inversion:
+                if self._inversion and pos.direction in ("BULL", "BEAR"):
+                    orig_dir = getattr(pos, "original_direction", pos.direction).lower()
                     self._inversion.record_result(TradeResult(
                         symbol=pos.symbol,
-                        direction="bull" if pos.direction == "BULL" else "bear",
+                        direction=orig_dir if orig_dir else pos.direction.lower(),
                         pnl=pos.unrealized_pnl,
                         won=pos.unrealized_pnl > 0,
                     ))
@@ -385,9 +386,11 @@ class EstherEngine:
                     self._record_streak(pos)
                     # Feed result to inversion engine
                     if self._inversion:
+                        orig_dir = getattr(pos, "original_direction", pos.direction).lower()
+                        orig_dir = orig_dir if orig_dir else ("bull" if pos.direction == "BULL" else "bear")
                         self._inversion.record_result(TradeResult(
                             symbol=pos.symbol,
-                            direction="bull" if pos.direction == "BULL" else "bear",
+                            direction=orig_dir,
                             pnl=pos.unrealized_pnl,
                             won=pos.unrealized_pnl > 0,
                         ))
@@ -403,9 +406,11 @@ class EstherEngine:
                     self._record_streak(pos)
                     # Feed result to inversion engine
                     if self._inversion:
+                        orig_dir = getattr(pos, "original_direction", pos.direction).lower()
+                        orig_dir = orig_dir if orig_dir else ("bull" if pos.direction == "BULL" else "bear")
                         self._inversion.record_result(TradeResult(
                             symbol=pos.symbol,
-                            direction="bull" if pos.direction == "BULL" else "bear",
+                            direction=orig_dir,
                             pnl=pos.unrealized_pnl,
                             won=pos.unrealized_pnl > 0,
                         ))
@@ -585,6 +590,7 @@ class EstherEngine:
                     tier_name=tier_name,
                     pillar=pillar,
                     direction=direction,
+                    original_direction="BULL" if raw_bias.score > 0 else "BEAR",
                     chain=chain,
                     expiration=expiration,
                     quote=quote,
@@ -608,6 +614,7 @@ class EstherEngine:
         tier_name: str,
         pillar: int,
         direction: str,
+        original_direction: str,
         chain: list[OptionQuote],
         expiration: str,
         quote: Quote,
@@ -829,6 +836,7 @@ class EstherEngine:
             order=final_order,
             order_id=order_id,
             direction=direction,
+            original_direction=original_direction,
             tier=tier_name,
             confidence=verdict.confidence,
         )

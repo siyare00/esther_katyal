@@ -148,6 +148,7 @@ class Position(BaseModel):
     # Metadata
     tier: str = ""
     direction: str = ""  # BULL or BEAR
+    original_direction: str = ""  # BULL or BEAR before inversion
     debate_confidence: int = 0
 
 
@@ -236,6 +237,7 @@ class PositionManager:
         order: SpreadOrder,
         order_id: str = "",
         direction: str = "",
+        original_direction: str = "",
         tier: str = "",
         confidence: int = 0,
         is_swing: bool = False,
@@ -306,6 +308,7 @@ class PositionManager:
             current_value=entry_price,
             tier=tier,
             direction=direction,
+            original_direction=original_direction,
             debate_confidence=confidence,
             tranches=tranches,
             active_quantity=order.quantity,

@@ -177,6 +177,8 @@ class EngineConfig(BaseModel):
     market_close: str = "16:00"
     pre_market_scan: str = "09:15"
     eod_cleanup: str = "15:45"
+    first_trade_after: str = "09:35"
+    max_trades_per_day: int = 50
 
 
 # --- NEW CONFIG MODELS ---

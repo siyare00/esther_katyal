@@ -604,6 +604,18 @@ class RiskManager:
                 account_tier=account_tier.tier_name,
             )
 
+        # Check 10: Max trades per day
+        max_daily = config().engine.max_trades_per_day if hasattr(config().engine, 'max_trades_per_day') else 50
+        trades_today = self._daily_stats.total_trades + len(self.pm.open_day_positions)
+        if trades_today >= max_daily and not is_scale_in:
+            return RiskCheck(
+                approved=False,
+                reason=f"MAX_TRADES_PER_DAY: Hit daily limit of {max_daily} trades",
+                daily_pnl=daily_pnl,
+                daily_loss_cap=self.daily_loss_cap,
+                account_tier=account_tier.tier_name,
+            )
+
         # All checks passed
         pdt_remaining = self.get_pdt_trades_remaining()
 
