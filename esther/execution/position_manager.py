@@ -33,6 +33,7 @@ from esther.core.config import config
 from esther.data.tradier import TradierClient
 from esther.data.alpaca import AlpacaClient
 from esther.execution.pillars import SpreadOrder, OrderSide, check_expire_worthless, OptionType
+from esther.risk.journal import TradeJournal, TradeEntry
 
 logger = structlog.get_logger(__name__)
 
@@ -191,6 +192,7 @@ class PositionManager:
         self._closed_positions: list[Position] = []
         self._next_id = 1
         self._swing_positions: dict[str, Position] = {}  # Separate tracking for swings
+        self._journal = TradeJournal()
 
     async def _close_leg(
         self, symbol: str, option_symbol: str, side: str, quantity: int
@@ -924,6 +926,37 @@ class PositionManager:
         self._closed_positions.append(pos)
         if pos.id in self._positions:
             del self._positions[pos.id]
+
+        # --- Handshake Check: Synchronous Verified Ledger Entry ---
+        try:
+            pnl = pos.unrealized_pnl
+            won = pnl > 0
+            direction = getattr(pos, "direction", "UNKNOWN")
+            entry = TradeEntry(
+                id=pos.id,
+                date=date.today().isoformat(),
+                timestamp=datetime.now().isoformat(),
+                symbol=pos.symbol,
+                pillar=pos.pillar,
+                direction=direction,
+                entry_price=pos.entry_price,
+                contracts=pos.quantity,
+                exit_price=pos.current_value,
+                pnl=pnl,
+                pnl_pct=(pnl / (pos.entry_price * pos.quantity * 100) * 100) if pos.entry_price > 0 and pos.quantity > 0 else 0,
+                exit_reason=pos.status.value if hasattr(pos.status, "value") else str(pos.status),
+                won=won,
+                vix_level=0.0,
+                ai_confidence=getattr(pos, "debate_confidence", 0),
+                ai_verdict=getattr(pos, "ai_verdict", ""),
+                bias_score=getattr(pos, "bias_score", 0.0),
+                flow_bias=0.0,
+            )
+            self._journal.record(entry)
+            logger.info("verified_ledger_entry_sync_complete", id=pos.id, pnl=pnl)
+        except Exception as e:
+            logger.error("verified_ledger_entry_failed", id=pos.id, error=str(e))
+        # ------------------------------------------------------------
 
         logger.info(
             "position_closed",

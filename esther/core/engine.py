@@ -100,6 +100,7 @@ class EstherEngine:
         self._reentry = ReentryGuard(required_candles=2)
         self._sage = Sage()
         self._last_sage_scan: float = 0.0  # timestamp of last intraday sage scan
+        self._module_mtimes: dict[str, float] = {}  # for hot-reloading signals
 
         # State
         self._running = False
@@ -350,6 +351,41 @@ class EstherEngine:
         self._scan_count += 1
         self._debated_this_cycle.clear()
         logger.info("scan_cycle_start", cycle=self._scan_count)
+
+        # Step 0.5: Self-Healing Loop (Hot-Reload signals)
+        try:
+            import sys
+            import importlib
+            from pathlib import Path
+            signals_dir = Path("esther-trading/esther/signals") if Path("esther-trading/esther/signals").exists() else Path("esther/signals")
+            if signals_dir.exists():
+                for py_file in signals_dir.glob("*.py"):
+                    if py_file.name == "__init__.py": continue
+                    mod_name = f"esther.signals.{py_file.stem}"
+                    if mod_name in sys.modules:
+                        mtime = py_file.stat().st_mtime
+                        if mod_name not in self._module_mtimes:
+                            self._module_mtimes[mod_name] = mtime
+                        elif self._module_mtimes[mod_name] < mtime:
+                            logger.info("hot_reloading_module", module=mod_name)
+                            importlib.reload(sys.modules[mod_name])
+                            self._module_mtimes[mod_name] = mtime
+                            
+                            # Re-instantiate if it's a direct engine component
+                            if mod_name == "esther.signals.bias_engine":
+                                self._bias_engine = sys.modules[mod_name].BiasEngine()
+                            elif mod_name == "esther.signals.inversion_engine":
+                                self._inversion = sys.modules[mod_name].InversionEngine()
+                            elif mod_name == "esther.signals.quality_filter":
+                                self._quality_filter = sys.modules[mod_name].QualityFilter()
+                            elif mod_name == "esther.signals.black_swan":
+                                self._black_swan = sys.modules[mod_name].BlackSwanDetector(self._client)
+                            elif mod_name == "esther.signals.reentry":
+                                self._reentry = sys.modules[mod_name].ReentryGuard(required_candles=2)
+                            elif mod_name == "esther.signals.sage":
+                                self._sage = sys.modules[mod_name].Sage()
+        except Exception as e:
+            logger.warning("hot_reload_failed", error=str(e))
 
         # Step 0: Sage intraday scan (throttled — every 5 minutes)
         import time as _time_mod
@@ -1143,7 +1179,7 @@ class EstherEngine:
                 bias_score=bias_score_val,
                 flow_bias=flow_bias_at_close,
             )
-            self._journal.record(entry)
+            # self._journal.record(entry)  # Moved to PositionManager._close_position for synchronous Verified Ledger Entry
         except Exception as e:
             logger.warning("journal_record_failed", error=str(e))
 
