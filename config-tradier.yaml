@@ -73,9 +73,9 @@ ai:
   ai_backend: "gemini"
   ollama_model: "glm-4.7-flash:latest"
   ollama_base_url: "http://127.0.0.1:11434/v1"
-  groq_model: "llama-3.3-70b-versatile"
-  groq_fallback_models:
-    - "llama-3.1-8b-instant"
+#  groq_model: "llama-3.3-70b-versatile"
+#  groq_fallback_models:
+#    - "llama-3.1-8b-instant"
   gemini_model: "gemini-2.5-flash"
   gemini_fallback_models:
     - "gemini-3-flash-preview"

@@ -48,7 +48,7 @@ def configure_logging(level: str = "INFO", log_file: str | None = None) -> None:
             getattr(logging, level.upper(), logging.INFO)
         ),
         context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
+        logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
 
@@ -56,7 +56,12 @@ def configure_logging(level: str = "INFO", log_file: str | None = None) -> None:
     if log_file:
         log_path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        # File logging handled by structlog via PrintLogger to stderr/file
+        logging.basicConfig(
+            handlers=[logging.FileHandler(log_path)],
+            level=getattr(logging, level.upper(), logging.INFO),
+            format="%(message)s", # structlog handles formatting
+        )
+
 
 
 def parse_args() -> argparse.Namespace:

@@ -398,12 +398,12 @@ class Sage:
     async def _populate_calendar(self, intel: MarketIntel) -> None:
         """Check economic calendar."""
         try:
-            event = self._calendar.get_todays_events()
+            event = self._calendar.get_events_today()
             if event:
                 intel.is_event_day = True
                 intel.event_name = str(event)
 
-            week_events = self._calendar.get_week_events()
+            week_events = self._calendar.get_events_this_week()
             if week_events:
                 intel.events_this_week = [
                     {"date": str(e.get("date", "")), "name": str(e.get("name", ""))}
