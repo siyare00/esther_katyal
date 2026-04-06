@@ -113,6 +113,9 @@ class MarketIntel(BaseModel):
     spx_range_low: float = 0.0
     spx_range_high: float = 0.0
 
+    # Dynamic tickers — top 20 by flow activity today
+    dynamic_tickers: list[str] = []
+
     # Sage's summary (plain text intelligence brief)
     intel_brief: str = ""
 
@@ -253,6 +256,7 @@ class Sage:
         await self._populate_prices(intel)
         await self._populate_calendar(intel)
         await self._populate_watchlist(intel)
+        await self._populate_dynamic_tickers(intel)
         self._calculate_expected_moves(intel)
 
         intel.intel_brief = self._build_premarket_brief(intel)
@@ -447,6 +451,17 @@ class Sage:
                     intel.watchlist_approaching = summary["approaching_symbols"]
         except Exception as e:
             logger.warning("sage_watchlist_error", error=str(e))
+
+    async def _populate_dynamic_tickers(self, intel: MarketIntel) -> None:
+        """Fetch top 20 most active tickers from UW flow alerts for today's scan."""
+        try:
+            top_tickers = await self._uw.get_top_flow_tickers(limit=200, top_n=20)
+            if top_tickers:
+                intel.dynamic_tickers = top_tickers
+                logger.info("sage_dynamic_tickers", count=len(top_tickers), tickers=top_tickers)
+        except Exception as e:
+            logger.warning("sage_dynamic_tickers_error", error=str(e))
+            intel.dynamic_tickers = []
 
     def _calculate_expected_moves(self, intel: MarketIntel) -> None:
         """Calculate expected moves from VIX."""

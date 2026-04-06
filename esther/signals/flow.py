@@ -353,6 +353,34 @@ class UnusualWhalesClient:
         )
         return data.get("data", data) if isinstance(data, dict) else data
 
+    async def get_top_flow_tickers(self, limit: int = 200, top_n: int = 20) -> list[str]:
+        """Fetch top N tickers by flow alert count from Unusual Whales.
+
+        Pulls the most active options tickers from UW flow alerts and returns
+        the top_n by number of alerts. Used to build the dynamic daily scan universe.
+        Excludes indices (SPXW, SPX, VIX) and very small/illiquid names.
+        """
+        from collections import Counter
+        cache_key = f"top_flow_tickers:{limit}:{top_n}"
+        data = await self._get(
+            "/api/option-trades/flow-alerts",
+            params={"limit": limit},
+            cache_key=cache_key,
+            cache_ttl=300,  # 5-min cache — refresh frequently during market hours
+        )
+        alerts = data.get("data", data) if isinstance(data, dict) else data
+        if not isinstance(alerts, list):
+            return []
+
+        # Exclude index symbols and very low marketcap names
+        EXCLUDE = {"SPXW", "SPX", "VIX", "UVXY", "VXX"}
+        tickers = [
+            a["ticker"] for a in alerts
+            if isinstance(a, dict) and a.get("ticker") and a["ticker"] not in EXCLUDE
+        ]
+        top = [t for t, _ in Counter(tickers).most_common(top_n)]
+        return top
+
     async def get_max_pain(self, ticker: str) -> list[dict[str, Any]]:
         """GET /api/stock/{ticker}/max-pain — max pain per expiry."""
         cache_key = f"max_pain:{ticker}"

@@ -3,17 +3,20 @@
 
 tickers:
   tier1:
-    symbols: ["SPY", "QQQ", "IWM", "SPX"]
+    # Core indices — 0DTE, all pillars
+    symbols: ["SPY", "QQQ", "IWM", "SPX", "DIA", "XSP"]
     expiry: "0dte"
     pillars: [1, 2, 3, 4, 5]
   tier2:
-    symbols: ["GLD", "SLV", "USO", "TLT"]
-    expiry: "0dte"
-    pillars: [1, 2, 3, 4, 5]
+    # Sector ETFs + Commodities — weekly options, directional plays
+    symbols: ["GLD", "SLV", "USO", "TLT", "XLF", "XLK", "XLE", "XLV", "XLI", "ARKK", "HYG", "EWZ"]
+    expiry: "weekly"
+    pillars: [2, 3, 4]
   tier3:
-    symbols: ["NVDA", "TSLA", "AAPL", "AMZN"]
-    expiry: "0dte"
-    pillars: [1, 2, 3, 4, 5]
+    # Mega-cap tech + high-IV names — weekly, directional + spreads
+    symbols: ["NVDA", "TSLA", "AAPL", "AMZN", "META", "GOOGL", "MSFT", "AMD", "NFLX", "COIN", "MSTR", "PLTR", "SOFI", "IONQ", "RIVN", "UBER"]
+    expiry: "weekly"
+    pillars: [2, 3, 4]
 
 # Inherit everything else from defaults — only override what differs
 # Bias, quality, pillars, risk, AI, sizing all use same defaults
@@ -22,8 +25,8 @@ tickers:
 risk:
   max_positions:
     tier1: 20
-    tier2: 10
-    tier3: 10
+    tier2: 15
+    tier3: 20
   daily_loss_cap_pct: 1.00      # no kill-switch on paper
   max_risk_per_ticker_pct: 0.75  # 75% — go big on paper
   cooldown_consecutive_losses: 0

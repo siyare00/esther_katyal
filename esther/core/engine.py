@@ -4,12 +4,29 @@ Chains all modules together in the main trading loop:
     1. Black Swan check → gate all activity
     2. Bias Engine → directional scoring
     3. Inversion Engine → self-correction
+    3c. Alpha (Sonnet) → market condition analysis (once per cycle)
+    3d. Neo (Opus) → periodic health check + error diagnosis + SELF-HEALING
     4. Quality Filter → option quality gate
-    5. AI Debate → Riki/Abi/Kage argue the trade
+    5. AI Debate → Alpha context + Kimi/Riki/Abi/Kage argue the trade
     6. AI Sizing → Kelly + capital recycler
     7. Pillar Executor → build and submit orders
     8. Position Manager → track and manage open positions
     9. Risk Manager → enforce limits throughout
+
+6 AI Agents:
+    Alpha 🌐 — Market condition analyzer (Sonnet) — runs once per scan cycle
+    Kimi 🔬  — Research analyst (Sonnet) — quantified risk analysis per trade
+    Riki 🐂  — The bull (Sonnet) — argues for going long
+    Abi 🐻   — The bear (Sonnet) — argues for going short
+    Kage ⚖️  — The judge (Sonnet) — final verdict per trade
+    Neo 🛡️   — Self-healing watchdog (Opus) — diagnoses errors, patches code live, hot-reloads
+
+5 Pillars:
+    P1 — Iron Condors (neutral zone)
+    P2 — Bear Call Spreads (bearish)
+    P3 — Bull Put Spreads (bullish)
+    P4 — Directional Scalps (high conviction)
+    P5 — Butterfly Spreads (moderate conviction)
 
 Runs every scan_interval_seconds during market hours (9:30 AM - 4:00 PM ET).
 Pre-market scan at 9:15 AM. EOD cleanup at 3:45 PM.
@@ -19,6 +36,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
@@ -33,7 +51,9 @@ from esther.signals.black_swan import BlackSwanDetector, BlackSwanStatus, Threat
 from esther.signals.bias_engine import BiasEngine, BiasScore
 from esther.signals.quality_filter import QualityFilter, QualityCheck
 from esther.signals.inversion_engine import InversionEngine, TradeResult
+from esther.ai.alpha import AlphaAgent, AlphaReport
 from esther.ai.debate import AIDebate, DebateInput, DebateVerdict
+from esther.ai.neo import NeoAgent, NeoAlert, NeoHealthCheck
 from esther.ai.sizing import AISizer, SizingInput, SizingResult
 from esther.execution.pillars import PillarExecutor, SpreadOrder
 from esther.execution.position_manager import PositionManager, Position, PositionStatus
@@ -91,7 +111,9 @@ class EstherEngine:
         self._bias_engine: BiasEngine | None = None
         self._quality_filter: QualityFilter | None = None
         self._inversion: InversionEngine | None = None
+        self._alpha: AlphaAgent | None = None
         self._debate: AIDebate | None = None
+        self._neo: NeoAgent | None = None
         self._sizer: AISizer | None = None
         self._executor: PillarExecutor | None = None
         self._position_mgr: PositionManager | None = None
@@ -116,6 +138,10 @@ class EstherEngine:
 
         # Duplicate debate prevention: tracks "symbol:pillar" debated this scan cycle
         self._debated_this_cycle: set[str] = set()
+
+        # Neo error tracking
+        self._errors_today: int = 0
+        self._rejections_today: int = 0
 
     # ── Lifecycle ────────────────────────────────────────────────
 
@@ -166,10 +192,51 @@ class EstherEngine:
         self._bias_engine = BiasEngine()
         self._quality_filter = QualityFilter()
         self._inversion = InversionEngine()
+        self._alpha = AlphaAgent()
         self._debate = AIDebate()
+        self._neo = NeoAgent(health_check_interval=self._cfg.ai.neo_health_check_interval)
         self._sizer = AISizer()
         self._executor = PillarExecutor(self._client)
         self._position_mgr = PositionManager(self._client)
+
+    def _reinit_healed_component(self, neo_alert) -> None:
+        """Re-instantiate a component after Neo patched and hot-reloaded its module."""
+        if not neo_alert.patch or not neo_alert.patch.reloaded:
+            return
+
+        module_name = neo_alert.patch.file_path.replace("/", ".").replace("\\", ".").removesuffix(".py")
+
+        try:
+            if module_name == "esther.signals.bias_engine":
+                self._bias_engine = sys.modules[module_name].BiasEngine()
+            elif module_name == "esther.signals.inversion_engine":
+                self._inversion = sys.modules[module_name].InversionEngine()
+            elif module_name == "esther.signals.quality_filter":
+                self._quality_filter = sys.modules[module_name].QualityFilter()
+            elif module_name == "esther.signals.black_swan":
+                self._black_swan = sys.modules[module_name].BlackSwanDetector(self._client)
+            elif module_name == "esther.signals.reentry":
+                self._reentry = sys.modules[module_name].ReentryGuard(required_candles=2)
+            elif module_name == "esther.signals.sage":
+                self._sage = sys.modules[module_name].Sage()
+            elif module_name == "esther.ai.debate":
+                self._debate = sys.modules[module_name].AIDebate()
+            elif module_name == "esther.ai.sizing":
+                self._sizer = sys.modules[module_name].AISizer()
+            elif module_name == "esther.ai.alpha":
+                self._alpha = sys.modules[module_name].AlphaAgent()
+            elif module_name == "esther.execution.pillars":
+                self._executor = sys.modules[module_name].PillarExecutor(self._client)
+            elif module_name == "esther.execution.position_manager":
+                logger.info("neo_heal_position_mgr_skipped", reason="preserving open position state")
+            elif module_name == "esther.risk.risk_manager":
+                logger.info("neo_heal_risk_mgr_skipped", reason="preserving daily risk state")
+            else:
+                logger.info("neo_heal_no_reinit_needed", module=module_name)
+
+            logger.info("neo_component_reinit", module=module_name)
+        except Exception as e:
+            logger.error("neo_reinit_failed", module=module_name, error=str(e))
 
     # ── Main Loop ────────────────────────────────────────────────
 
@@ -182,7 +249,12 @@ class EstherEngine:
             market_open = time(9, 30)
             market_close = time(16, 0)
             pre_market = time(9, 15)
-            eod_time = time(15, 45)
+            # Read eod_cleanup from config (format "HH:MM"), fallback to 15:45
+            try:
+                _eod_parts = self._cfg.engine.eod_cleanup.split(":")
+                eod_time = time(int(_eod_parts[0]), int(_eod_parts[1]))
+            except Exception:
+                eod_time = time(15, 45)
 
             # ── Before Market ────────────────────────────────────
             if current_time < pre_market:
@@ -254,6 +326,8 @@ class EstherEngine:
             self._risk_mgr.reset_daily(self._account_balance)
         self._scan_count = 0
         self._eod_done = False
+        self._errors_today = 0
+        self._rejections_today = 0
 
         # Pre-market Black Swan check
         try:
@@ -266,10 +340,28 @@ class EstherEngine:
         except Exception as e:
             logger.error("pre_market_swan_failed", error=str(e))
 
-        # Sage pre-market intelligence scan
+        # Sage pre-market intelligence scan + dynamic ticker injection
         try:
             sage_intel = await self._sage.premarket_scan()
             logger.info("sage_premarket_complete", brief_len=len(sage_intel.intel_brief))
+
+            # Inject top 20 flow tickers from UW into tier3 for today's session
+            if sage_intel.dynamic_tickers:
+                existing = set()
+                for tc in self._cfg.tickers.values():
+                    existing.update(tc.symbols)
+
+                # Add new tickers not already in any tier
+                new_tickers = [t for t in sage_intel.dynamic_tickers if t not in existing]
+                if new_tickers:
+                    self._cfg.tickers["tier3"].symbols = list(
+                        set(self._cfg.tickers["tier3"].symbols) | set(new_tickers)
+                    )
+                    logger.info(
+                        "dynamic_tickers_injected",
+                        new=new_tickers,
+                        total_tier3=len(self._cfg.tickers["tier3"].symbols),
+                    )
         except Exception as e:
             logger.warning("sage_premarket_failed", error=str(e))
 
@@ -315,11 +407,12 @@ class EstherEngine:
         except Exception as e:
             logger.warning("sage_eod_failed", error=str(e))
 
-        # Place GTC overnight orders for tomorrow
-        try:
-            await self._place_gtc_overnight_orders()
-        except Exception as e:
-            logger.error("gtc_overnight_failed", error=str(e))
+        # Place GTC overnight orders for tomorrow (Tradier only — Alpaca paper doesn't support multi-leg GTC)
+        if not isinstance(self._client, AlpacaClient):
+            try:
+                await self._place_gtc_overnight_orders()
+            except Exception as e:
+                logger.error("gtc_overnight_failed", error=str(e))
 
         # Generate daily report
         if self._risk_mgr:
@@ -463,6 +556,66 @@ class EstherEngine:
         if now_et.time() < time(10, 0):
             return
 
+        # Step 3c: Alpha market condition analysis (once per cycle)
+        try:
+            spy_price = 0.0
+            spy_change = 0.0
+            qqq_price = 0.0
+            qqq_change = 0.0
+            try:
+                spy_quotes = await self._client.get_quotes(["SPY"])
+                if spy_quotes:
+                    spy_price = spy_quotes[0].last
+                    spy_change = spy_quotes[0].change_pct
+                qqq_quotes = await self._client.get_quotes(["QQQ"])
+                if qqq_quotes:
+                    qqq_price = qqq_quotes[0].last
+                    qqq_change = qqq_quotes[0].change_pct
+            except Exception:
+                pass
+
+            sage_intel = self._sage.get_intel_for_debate() or None
+            daily_pnl = self._position_mgr.get_daily_pnl() if self._position_mgr else 0.0
+
+            alpha_report = await self._alpha.analyze(
+                vix_level=self._current_swan_status.vix if self._current_swan_status else 20.0,
+                spy_price=spy_price,
+                spy_change_pct=spy_change,
+                qqq_price=qqq_price,
+                qqq_change_pct=qqq_change,
+                sage_intel=sage_intel,
+                account_balance=self._account_balance,
+                daily_pnl=daily_pnl,
+            )
+
+            if alpha_report.posture == "CASH":
+                logger.warning("alpha_says_cash", summary=alpha_report.summary)
+                return
+
+        except Exception as e:
+            logger.warning("alpha_analysis_failed", error=str(e))
+
+        # Step 3d: Neo health check (periodic)
+        try:
+            daily_pnl = self._position_mgr.get_daily_pnl() if self._position_mgr else 0.0
+            open_pos = self._position_mgr.get_position_count() if self._position_mgr else 0
+            total_trades = self._risk_mgr.total_trades if self._risk_mgr else 0
+
+            neo_check = await self._neo.health_check(
+                account_balance=self._account_balance,
+                daily_pnl=daily_pnl,
+                open_positions=open_pos,
+                total_trades_today=total_trades,
+                scan_count=self._scan_count,
+                errors_today=self._errors_today,
+                rejection_count=self._rejections_today,
+            )
+
+            if neo_check and neo_check.health == "CRITICAL":
+                logger.error("neo_critical_health", issues=neo_check.issues)
+        except Exception as e:
+            logger.warning("neo_health_check_failed", error=str(e))
+
         # Step 4: Process tickers by tier (Tier 1 first, then 2, then 3)
         tier_order = ["tier1", "tier2", "tier3"]
         for tier_name in tier_order:
@@ -477,6 +630,7 @@ class EstherEngine:
                 try:
                     await self._process_ticker(symbol, tier_name, tier_cfg)
                 except Exception as e:
+                    self._errors_today += 1
                     logger.error(
                         "ticker_processing_failed",
                         symbol=symbol,
@@ -484,6 +638,20 @@ class EstherEngine:
                         error=str(e),
                         exc_info=True,
                     )
+                    # Neo diagnoses and auto-fixes the error
+                    try:
+                        neo_alert = await self._neo.on_error(
+                            error=e,
+                            context=f"Processing ticker {symbol} in {tier_name}",
+                            symbol=symbol,
+                            component="engine._process_ticker",
+                        )
+                        if neo_alert.healed:
+                            self._reinit_healed_component(neo_alert)
+                        if neo_alert.should_stop:
+                            logger.error("neo_says_stop", alert=neo_alert.root_cause)
+                    except Exception:
+                        pass  # Neo failure is non-fatal
                     # One ticker failing doesn't stop the loop
                     continue
 
@@ -746,6 +914,9 @@ class EstherEngine:
         # Get journal lessons so agents learn from recent mistakes
         journal_lessons = self._journal.get_lessons()
 
+        # Inject Alpha's market condition report into debate context
+        alpha_context = self._alpha.get_debate_context() if self._alpha else ""
+
         debate_input = DebateInput(
             symbol=symbol,
             current_price=quote.last,
@@ -757,13 +928,20 @@ class EstherEngine:
             flow_bias=flow_bias,
             flow_summary=flow_summary,
             sage_intel=sage_intel if sage_intel else None,
-            journal_lessons=journal_lessons,
+            journal_lessons=journal_lessons + alpha_context,
         )
 
         try:
             verdict = await self._debate.debate_with_kimi(debate_input)
         except Exception as e:
+            self._errors_today += 1
             log.error("debate_failed", error=str(e))
+            try:
+                neo_alert = await self._neo.on_error(e, context=f"AI debate for {symbol}", symbol=symbol, component="ai.debate")
+                if neo_alert.healed:
+                    self._reinit_healed_component(neo_alert)
+            except Exception:
+                pass
             return
 
         # Check debate verdict aligns with pillar direction
@@ -847,6 +1025,7 @@ class EstherEngine:
         )
 
         if not risk_check.approved:
+            self._rejections_today += 1
             log.info("risk_rejected", reason=risk_check.reason)
             return
 
@@ -868,8 +1047,17 @@ class EstherEngine:
         try:
             result = await self._executor.submit_order(final_order)
             order_id = str(result.get("order", {}).get("id", ""))
+            if self._neo:
+                self._neo.on_trade_success()
         except Exception as e:
+            self._errors_today += 1
             log.error("order_submit_failed", error=str(e))
+            try:
+                neo_alert = await self._neo.on_error(e, context=f"Order submit for {symbol} P{pillar}", symbol=symbol, component="execution.pillars")
+                if neo_alert.healed:
+                    self._reinit_healed_component(neo_alert)
+            except Exception:
+                pass
             return
 
         # Register position with position manager

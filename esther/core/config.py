@@ -162,6 +162,11 @@ class AIConfig(BaseModel):
     gemini_fallback_models: list[str] = []  # Extra Gemini models
     gemini_api_key: str = ""  # Set via GEMINI_API_KEY env or config
 
+    # Agent-specific model routing
+    alpha_model: str = "claude-sonnet-4-20250514"    # Alpha: market analyzer (Sonnet)
+    neo_model: str = "claude-opus-4-20250514"         # Neo: watchdog/fixer (Opus)
+    neo_health_check_interval: int = 10               # Neo checks every N scan cycles
+
 
 class SizingConfig(BaseModel):
     kelly_fraction: float = 0.25

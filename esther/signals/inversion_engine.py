@@ -136,8 +136,7 @@ class InversionEngine:
             tracker.total_losses += 1
 
             # Check if we hit the inversion trigger
-            # 180 Acrobat Flip 20x: trigger inversion on EVERY loss (1 loss) instead of waiting for 3.
-            if tracker.consecutive_losses >= 1: # was self._cfg.consecutive_loss_trigger
+            if tracker.consecutive_losses >= self._cfg.consecutive_loss_trigger:
                 tracker.inverted = not tracker.inverted  # Toggle
                 tracker.consecutive_losses = 0  # Reset counter
                 tracker.last_inversion = datetime.now()

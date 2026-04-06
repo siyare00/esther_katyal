@@ -99,7 +99,7 @@ risk:
     tier1: 20
     tier2: 10
     tier3: 10
-  daily_loss_cap_pct: 1.00    # 100% — no kill-switch on paper
+  daily_loss_cap_pct: 0.02    # 2% daily loss cap (was 100% on paper)
   max_risk_per_ticker_pct: 0.50  # 50% per ticker on paper
   cooldown_consecutive_losses: 0
   cooldown_minutes: 0
