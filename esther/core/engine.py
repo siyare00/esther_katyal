@@ -932,7 +932,7 @@ class EstherEngine:
         )
 
         try:
-            verdict = await self._debate.debate_with_kimi(debate_input)
+            verdict = await self._debate.debate(debate_input)  # Kage-only: Riki→Abi→Kage (no Kimi veto)
         except Exception as e:
             self._errors_today += 1
             log.error("debate_failed", error=str(e))

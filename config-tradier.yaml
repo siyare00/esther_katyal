@@ -44,7 +44,7 @@ engine:
   market_close: "16:00"
   pre_market_scan: "09:15"
   eod_cleanup: "15:50"
-  first_trade_after: "09:35"    # trade from open
+  first_trade_after: "10:00"    # SuperLuckeee: no trades in first 30min FOMO zone
   max_trades_per_day: 50        # no limit
 
 # Quality — match Alpaca aggressive settings
