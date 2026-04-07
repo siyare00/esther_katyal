@@ -160,7 +160,6 @@ class TradierClient:
 
         url = f"{self.base_url}{path}"
         delay = self.RETRY_DELAY
-        last_error = "unknown error"  # Neo fix: ensure last_error always defined
 
         for attempt in range(self.MAX_RETRIES):
             await self._rate_limit()
@@ -196,8 +195,6 @@ class TradierClient:
                     error=error_body,
                     attempt=attempt
                 )
-                # Store last error for better diagnostics
-                last_error = f"HTTP {e.response.status_code}: {error_body}"
                 # Retry on 4xx errors too (except 429 which is handled above)
                 if e.response.status_code >= 400 and attempt < self.MAX_RETRIES - 1:
                     await asyncio.sleep(delay)
@@ -205,19 +202,8 @@ class TradierClient:
                     continue
                 raise
 
-            except httpx.TimeoutException as e:
+            except httpx.TimeoutException:
                 logger.warning("request_timeout", attempt=attempt)
-                last_error = f"Request timeout after {self._client.timeout}s"
-                if attempt < self.MAX_RETRIES - 1:
-                    await asyncio.sleep(delay)
-                    delay *= 2
-                    continue
-                raise
-
-            except Exception as e:
-                # Catch any other errors and preserve details
-                logger.error("unexpected_error", error=str(e), type=type(e).__name__, attempt=attempt)
-                last_error = f"{type(e).__name__}: {str(e)}"
                 if attempt < self.MAX_RETRIES - 1:
                     await asyncio.sleep(delay)
                     delay *= 2
@@ -225,7 +211,7 @@ class TradierClient:
                 raise
 
         # Include last error details in the exception
-        raise RuntimeError(f"Max retries ({self.MAX_RETRIES}) exceeded for {path}. Last error: {last_error}")
+        raise RuntimeError(f"Max retries ({self.MAX_RETRIES}) exceeded for {path}. Check logs for error details.")
 
     # ── Market Data ──────────────────────────────────────────────
 

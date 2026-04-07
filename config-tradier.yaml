@@ -3,20 +3,32 @@
 
 tickers:
   tier1:
-    # Core indices — 0DTE, all pillars
-    symbols: ["SPY", "QQQ", "IWM", "SPX", "DIA", "XSP"]
+    # SuperLuckeee PRIMARY: SPX/SPY/QQQ/IWM — 0DTE Iron Condors + all pillars
+    # These are the CORE money-makers. Always on. 0DTE only.
+    symbols: ["SPY", "QQQ", "IWM", "SPX"]
     expiry: "0dte"
-    pillars: [1, 2, 3, 4, 5]
+    pillars: [1, 2, 3, 4]
+
   tier2:
-    # Sector ETFs + Commodities — weekly options, directional plays
-    symbols: ["GLD", "SLV", "USO", "TLT", "XLF", "XLK", "XLE", "XLV", "XLI", "ARKK", "HYG", "EWZ"]
+    # SuperLuckeee SECONDARY: Commodities + Bonds (weekly options)
+    # GLD, SLV, USO, TLT — mentioned explicitly in strategy for P2/P3/P4
+    symbols: ["GLD", "SLV", "USO", "TLT"]
     expiry: "weekly"
     pillars: [2, 3, 4]
+
   tier3:
-    # Mega-cap tech + high-IV names — weekly, directional + spreads + ICs
-    symbols: ["NVDA", "TSLA", "AAPL", "AMZN", "META", "GOOGL", "MSFT", "AMD", "NFLX", "COIN", "MSTR", "PLTR", "SOFI", "IONQ", "RIVN", "UBER"]
+    # SuperLuckeee TIER 3: High-IV mega-caps (weekly options)
+    # NVDA, TSLA, AAPL, AMZN — explicitly named in strategy for P2/P3/P4
+    symbols: ["NVDA", "TSLA", "AAPL", "AMZN"]
     expiry: "weekly"
-    pillars: [1, 2, 3, 4]
+    pillars: [2, 3, 4]
+
+  tier4:
+    # EXTENDED UNIVERSE: Additional high-IV names for more opportunities
+    # Not in original SuperLuckeee list but high options volume, liquid
+    symbols: ["META", "MSFT", "AMD", "NFLX", "COIN", "PLTR", "GOOGL"]
+    expiry: "weekly"
+    pillars: [2, 3, 4]
 
 # Inherit everything else from defaults — only override what differs
 # Bias, quality, pillars, risk, AI, sizing all use same defaults
@@ -25,8 +37,10 @@ tickers:
 risk:
   max_positions:
     tier1: 20
-    tier2: 15
-    tier3: 20
+    tier2: 10
+    tier3: 10
+    tier4: 10
+    tier5: 10
   daily_loss_cap_pct: 1.00      # no kill-switch on paper
   max_risk_per_ticker_pct: 0.75  # 75% — go big on paper
   cooldown_consecutive_losses: 0

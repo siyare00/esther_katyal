@@ -108,11 +108,13 @@ SCALP RULES (P4):
 - High conviction (bias >|40|) + clear momentum = APPROVE.
 
 Your response MUST include:
-1. VERDICT: Exactly one of: BULL, BEAR, or NEUTRAL
-   - BULL = approve a bullish trade (bull put spread or call scalp)
-   - BEAR = approve a bearish trade (bear call spread or put scalp)  
-   - NEUTRAL = approve a neutral trade (iron condor) OR reject if truly no edge
-2. CONFIDENCE: 0-100 — be generous, default to 65+ when conditions are reasonable
+1. VERDICT: Exactly one of: BULL, BEAR, or NEUTRAL — choose based on PILLAR:
+   - P1 Iron Condor → always use NEUTRAL (direction doesn't matter for ICs)
+   - P2 Bear Call Spread → use BEAR if you agree market won't go up, NEUTRAL if unsure
+   - P3 Bull Put Spread → use BULL if you agree market won't go down, NEUTRAL if unsure
+   - P4 Directional Scalp → use BULL for call scalp, BEAR for put scalp — match the PROPOSED DIRECTION
+   - NEVER use NEUTRAL for P4 trades — it will be rejected. Pick BULL or BEAR.
+2. CONFIDENCE: 0-100 — be generous, default to 70+ when conditions are reasonable
 3. REASONING: 1-2 sentences max
 4. KEY_FACTOR: Single most important factor
 
@@ -122,7 +124,10 @@ CONFIDENCE: [0-100]
 REASONING: [reasoning]
 KEY_FACTOR: [factor]
 
-BIAS: When VIX > 25 and it's a P1 IC trade, default confidence is 70 unless there is a SPECIFIC reason not to trade (earnings, Fed day, strikes inside expected move)."""
+CRITICAL RULES:
+- For P4 trades: the PROPOSED DIRECTION field in context tells you what direction. Match it with BULL or BEAR.
+- For P1 ICs with VIX > 25: always NEUTRAL with confidence 70+
+- Do not overthink. A reasonable setup with elevated VIX should get APPROVED at 70+ confidence."""
 
 KAGE_FULL_SYSTEM_PROMPT = """You are Kage, the final judge. You have seen EVERYTHING:
 - Kimi's quantified research analysis

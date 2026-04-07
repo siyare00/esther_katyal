@@ -351,16 +351,19 @@ class EstherEngine:
                 for tc in self._cfg.tickers.values():
                     existing.update(tc.symbols)
 
-                # Add new tickers not already in any tier
+                # Add new tickers not already in any tier into tier5 (dynamic daily universe)
                 new_tickers = [t for t in sage_intel.dynamic_tickers if t not in existing]
                 if new_tickers:
-                    self._cfg.tickers["tier3"].symbols = list(
-                        set(self._cfg.tickers["tier3"].symbols) | set(new_tickers)
+                    from esther.core.config import TierConfig as TickerConfig
+                    self._cfg.tickers["tier5"] = TickerConfig(
+                        symbols=new_tickers,
+                        expiry="weekly",
+                        pillars=[2, 3, 4],
                     )
                     logger.info(
                         "dynamic_tickers_injected",
                         new=new_tickers,
-                        total_tier3=len(self._cfg.tickers["tier3"].symbols),
+                        total_tier5=len(new_tickers),
                     )
         except Exception as e:
             logger.warning("sage_premarket_failed", error=str(e))
@@ -616,8 +619,8 @@ class EstherEngine:
         except Exception as e:
             logger.warning("neo_health_check_failed", error=str(e))
 
-        # Step 4: Process tickers by tier (Tier 1 first, then 2, then 3)
-        tier_order = ["tier1", "tier2", "tier3"]
+        # Step 4: Process tickers by tier — dynamic, picks up any tier in config
+        tier_order = sorted(self._cfg.tickers.keys())  # tier1, tier2, tier3, tier4...
         for tier_name in tier_order:
             tier_cfg = self._cfg.tickers.get(tier_name)
             if not tier_cfg:
