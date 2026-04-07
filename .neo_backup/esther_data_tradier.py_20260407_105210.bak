@@ -121,11 +121,9 @@ class TradierClient:
         sandbox: bool | None = None,
     ):
         _env = env()
-        self.sandbox = sandbox if sandbox is not None else _env.tradier_sandbox
-
-        # Sandbox uses sandbox key; live uses live key
         self.api_key = api_key or _env.tradier_api_key
         self.account_id = account_id or _env.tradier_account_id
+        self.sandbox = sandbox if sandbox is not None else _env.tradier_sandbox
 
         self.base_url = SANDBOX_BASE if self.sandbox else PROD_BASE
         self.stream_url = SANDBOX_STREAM_BASE if self.sandbox else STREAM_BASE
@@ -301,18 +299,15 @@ class TradierClient:
                             error=error_details,
                             status=response_status)
                         # Allow up to 5 retries for 500 errors (backend issues)
-                        max_500_retries = 5
-                        if attempt >= max_500_retries:
-                            # Raise with correct retry count for 500 errors
-                            raise RuntimeError(f"Max retries ({max_500_retries}) exceeded for {path} (500 error). Last error: {last_error}")
+                        if attempt >= 5:
+                            break
                         # Exponential backoff: 10s, 20s, 30s, 40s
                         wait_time = min(10.0 * attempt, 40.0)
                         logger.info("backend_error_backoff", attempt=attempt, wait_seconds=wait_time)
                         await asyncio.sleep(wait_time)
                         continue
                     # For order errors, fail fast after 2 attempts to avoid duplicate orders
-                    # BUT not for 500 errors which we handle specially above
-                    if response_status != 500 and attempt >= 2:
+                    if attempt >= 2:
                         break
                     # Longer delay for order retries to let broker recover
                     await asyncio.sleep(5.0)

@@ -41,8 +41,8 @@ risk:
     tier3: 10
     tier4: 10
     tier5: 10
-  daily_loss_cap_pct: 1.00      # no kill-switch on paper
-  max_risk_per_ticker_pct: 0.75  # 75% — go big on paper
+  daily_loss_cap_pct: 0.02      # 2% daily loss hard stop — LIVE trading
+  max_risk_per_ticker_pct: 0.50  # 50% max risk per ticker — live account $965
   cooldown_consecutive_losses: 0
   cooldown_minutes: 0
 
@@ -100,8 +100,8 @@ ai:
 # Sizing — AGGRESSIVE for paper
 sizing:
   kelly_fraction: 0.50
-  min_contracts: 10
-  max_contracts: 50
+  min_contracts: 1
+  max_contracts: 1
   win_streak_multiplier: 1.30
   loss_streak_divisor: 1.0
 
