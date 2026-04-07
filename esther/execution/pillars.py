@@ -404,21 +404,29 @@ class PillarExecutor:
         cfg = self._cfg.p2
         wing_width = 10  # 10-point wings — SuperLuckeee standard
 
+        # Bear call spread: sell the LOWER OTM call (short), buy the HIGHER OTM call (long)
+        # short_delta=0.25 finds the call closest to 0.25 delta (closer to money = lower strike)
+        # long = short + wing_width (further OTM = higher strike = protection)
         short_call = find_closest_delta(chain, cfg.short_delta, OptionType.CALL)
         if not short_call:
             logger.warning("bear_call_no_short", symbol=symbol)
             return None
 
+        # Long is further OTM (higher strike = short + wing_width)
         long_call = find_wing(chain, short_call.strike, wing_width, OptionType.CALL)
         if not long_call:
             logger.warning("bear_call_no_long", symbol=symbol)
             return None
 
+        # Ensure short strike < long strike (short is closer to money)
+        if short_call.strike > long_call.strike:
+            short_call, long_call = long_call, short_call
+
         credit = short_call.mid - long_call.mid
         max_loss = wing_width - credit
 
         if credit <= 0:
-            logger.warning("bear_call_negative_credit", symbol=symbol)
+            logger.warning("bear_call_negative_credit", symbol=symbol, short=short_call.strike, long=long_call.strike, short_mid=short_call.mid, long_mid=long_call.mid)
             return None
 
         legs = [
