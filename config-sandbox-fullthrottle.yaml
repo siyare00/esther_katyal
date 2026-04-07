@@ -32,6 +32,7 @@ risk:
     tier5: 20
   daily_loss_cap_pct: 0.02      # 2% hard stop even on sandbox — protect the run
   max_risk_per_ticker_pct: 0.75
+    max_positions_per_ticker: 5
   cooldown_consecutive_losses: 0
   cooldown_minutes: 0
 
@@ -88,3 +89,6 @@ sizing:
 logging:
   level: "INFO"
   file: "logs/esther-sandbox.log"
+
+# Allow more positions per ticker on sandbox
+risk_extra:
