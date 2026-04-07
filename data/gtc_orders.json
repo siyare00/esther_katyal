@@ -838,5 +838,45 @@
     "time_in_force": "gtc",
     "placed_at": "2026-04-07T11:25:18.131145",
     "status": "pending"
+  },
+  {
+    "symbol": "SPY",
+    "pillar": 1,
+    "order_id": "120384052",
+    "expiration": "2026-04-08",
+    "net_price": 1.23,
+    "time_in_force": "gtc",
+    "placed_at": "2026-04-07T11:30:57.487785",
+    "status": "pending"
+  },
+  {
+    "symbol": "QQQ",
+    "pillar": 1,
+    "order_id": "120384061",
+    "expiration": "2026-04-08",
+    "net_price": 1.22,
+    "time_in_force": "gtc",
+    "placed_at": "2026-04-07T11:30:58.170716",
+    "status": "pending"
+  },
+  {
+    "symbol": "IWM",
+    "pillar": 1,
+    "order_id": "120384068",
+    "expiration": "2026-04-08",
+    "net_price": 0.98,
+    "time_in_force": "gtc",
+    "placed_at": "2026-04-07T11:30:58.703974",
+    "status": "pending"
+  },
+  {
+    "symbol": "SPX",
+    "pillar": 1,
+    "order_id": "120384073",
+    "expiration": "2026-04-08",
+    "net_price": 1.76,
+    "time_in_force": "gtc",
+    "placed_at": "2026-04-07T11:30:59.495751",
+    "status": "pending"
   }
 ]

@@ -411,12 +411,9 @@ class EstherEngine:
         except Exception as e:
             logger.warning("sage_eod_failed", error=str(e))
 
-        # Place GTC overnight orders for tomorrow (Tradier only — Alpaca paper doesn't support multi-leg GTC)
-        if not isinstance(self._client, AlpacaClient):
-            try:
-                await self._place_gtc_overnight_orders()
-            except Exception as e:
-                logger.error("gtc_overnight_failed", error=str(e))
+        # GTC overnight orders DISABLED — Tradier rejects GTC multileg on individual accounts
+        # All orders are DAY orders only. Let positions expire worthless or hit stop loss.
+        # logger.info("gtc_overnight_skipped", reason="GTC multileg not supported on live individual accounts")
 
         # Generate daily report
         if self._risk_mgr:
