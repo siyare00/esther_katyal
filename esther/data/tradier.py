@@ -191,7 +191,15 @@ class TradierClient:
                     continue
 
                 if resp.status_code >= 500:
-                    logger.warning("server_error", status=resp.status_code, attempt=attempt)
+                    try:
+                        err_body = resp.json()
+                    except Exception:
+                        err_body = resp.text[:200]
+                    last_error = f"HTTP 500: {err_body}"
+                    logger.warning("server_error", status=resp.status_code, attempt=attempt, body=err_body)
+                    # Tradier sandbox returns 500 on multileg options — log and skip (not retry)
+                    if "multileg" in str(err_body).lower() or path.endswith("/orders"):
+                        raise RuntimeError(f"Tradier order 500: {err_body}")
                     await asyncio.sleep(delay)
                     delay *= 2
                     continue
@@ -267,9 +275,37 @@ class TradierClient:
                             continue
                     elif response_status == 429:  # Rate limit
                         logger.warning("tradier_rate_limit", attempt=attempt)
-                        if attempt < self.MAX_RETRIES:
+                        if attempt < self.MAX_RETRIES - 1:
                             await asyncio.sleep(15.0)  # Back off significantly
                             continue
+                    elif response_status == 0 or "unknown error" in error_details.lower():
+                        # Handle ambiguous errors (network issues, timeouts, etc)
+                        logger.warning("tradier_unknown_error", 
+                            attempt=attempt, 
+                            error=error_details,
+                            possible_causes=["network_timeout", "broker_overload", "malformed_request"])
+                        # For unknown errors, allow full MAX_RETRIES with progressive backoff
+                        if attempt >= self.MAX_RETRIES:
+                            break
+                        # Progressive backoff: 8s, then 15s to avoid duplicate orders
+                        wait_time = 8.0 if attempt == 1 else 15.0
+                        logger.info("unknown_error_backoff", attempt=attempt, wait_seconds=wait_time)
+                        await asyncio.sleep(wait_time)
+                        continue
+                    elif response_status == 500:
+                        # Backend communication errors - give more retries with longer backoff
+                        logger.warning("tradier_backend_error", 
+                            attempt=attempt, 
+                            error=error_details,
+                            status=response_status)
+                        # Allow up to 5 retries for 500 errors (backend issues)
+                        if attempt >= 5:
+                            break
+                        # Exponential backoff: 10s, 20s, 30s, 40s
+                        wait_time = min(10.0 * attempt, 40.0)
+                        logger.info("backend_error_backoff", attempt=attempt, wait_seconds=wait_time)
+                        await asyncio.sleep(wait_time)
+                        continue
                     # For order errors, fail fast after 2 attempts to avoid duplicate orders
                     if attempt >= 2:
                         break
