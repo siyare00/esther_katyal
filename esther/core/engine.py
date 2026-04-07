@@ -599,7 +599,7 @@ class EstherEngine:
         try:
             daily_pnl = self._position_mgr.get_daily_pnl() if self._position_mgr else 0.0
             open_pos = self._position_mgr.get_position_count() if self._position_mgr else 0
-            total_trades = self._risk_mgr.total_trades if self._risk_mgr else 0
+            total_trades = self._risk_mgr._daily_stats.total_trades if self._risk_mgr else 0
 
             neo_check = await self._neo.health_check(
                 account_balance=self._account_balance,
