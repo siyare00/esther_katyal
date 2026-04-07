@@ -956,8 +956,8 @@ class EstherEngine:
             return
 
         # Minimum confidence threshold — SuperLuckeee: "only take high-conviction trades"
-        if verdict.confidence < 70:
-            log.info("debate_low_confidence", confidence=verdict.confidence, min_required=70)
+        if verdict.confidence < 50:
+            log.info("debate_low_confidence", confidence=verdict.confidence, min_required=50)
             return
 
         # ── 8. Risk Check (pre-trade) ────────────────────────────

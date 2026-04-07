@@ -608,11 +608,16 @@ class AIDebate:
         }
         legacy_verdict = verdict_map.get(consensus_action, "NEUTRAL")
 
-        # Use lower confidence of the two for safety
-        final_confidence = min(
-            kimi_parsed.get("confidence", 0),
-            kage_parsed.get("confidence", 0),
-        )
+        # Use average confidence of Kimi + Kage
+        # If Kimi returns 0 (parse failure), fall back to Kage confidence only
+        kimi_conf = kimi_parsed.get("confidence", 0)
+        kage_conf = kage_parsed.get("confidence", 0)
+        if kimi_conf == 0 and kage_conf > 0:
+            final_confidence = kage_conf  # Kimi parse failed, trust Kage
+        elif kimi_conf > 0 and kage_conf > 0:
+            final_confidence = (kimi_conf + kage_conf) // 2  # Average
+        else:
+            final_confidence = max(kimi_conf, kage_conf)
         # If no consensus, slash confidence
         if not consensus:
             final_confidence = min(final_confidence, 20)
@@ -1021,10 +1026,12 @@ KIMI_RESPONSE: [Your response to Kimi's concern]"""
         """Parse verdict from Kimi or Kage full format.
 
         Expected fields: VERDICT, CONFIDENCE, KEY_CONCERN, REASONING, KEY_FACTOR, KIMI_RESPONSE
+        Robust: handles markdown bold (**VERDICT:**), extra spaces, and numeric extraction.
 
         Returns:
             Dict with parsed fields.
         """
+        import re as _re
         result: dict[str, Any] = {
             "verdict": "REJECT",
             "confidence": 0,
@@ -1035,24 +1042,24 @@ KIMI_RESPONSE: [Your response to Kimi's concern]"""
         }
 
         for line in raw.strip().split("\n"):
-            line = line.strip()
-            if line.startswith("VERDICT:"):
-                v = line.split(":", 1)[1].strip().upper()
+            line = line.strip().lstrip("*").rstrip("*").strip()
+            if line.upper().startswith("VERDICT:"):
+                v = line.split(":", 1)[1].strip().upper().split()[0]
                 if v in ("APPROVE", "REDUCE", "REJECT", "INVERT"):
                     result["verdict"] = v
-            elif line.startswith("CONFIDENCE:"):
-                try:
-                    c = int(line.split(":", 1)[1].strip())
-                    result["confidence"] = max(0, min(100, c))
-                except ValueError:
-                    pass
-            elif line.startswith("KEY_CONCERN:"):
+            elif line.upper().startswith("CONFIDENCE:"):
+                raw_val = line.split(":", 1)[1].strip()
+                # Extract first number found (handles "75", "75/100", "75%", etc.)
+                nums = _re.findall(r'\d+', raw_val)
+                if nums:
+                    result["confidence"] = max(0, min(100, int(nums[0])))
+            elif line.upper().startswith("KEY_CONCERN:"):
                 result["key_concern"] = line.split(":", 1)[1].strip()
-            elif line.startswith("REASONING:"):
+            elif line.upper().startswith("REASONING:"):
                 result["reasoning"] = line.split(":", 1)[1].strip()
-            elif line.startswith("KEY_FACTOR:"):
+            elif line.upper().startswith("KEY_FACTOR:"):
                 result["key_factor"] = line.split(":", 1)[1].strip()
-            elif line.startswith("KIMI_RESPONSE:"):
+            elif line.upper().startswith("KIMI_RESPONSE:"):
                 result["kimi_response"] = line.split(":", 1)[1].strip()
 
         return result
