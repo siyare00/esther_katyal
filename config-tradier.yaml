@@ -41,8 +41,8 @@ risk:
     tier3: 10
     tier4: 10
     tier5: 10
-  daily_loss_cap_pct: 0.02      # 2% daily loss hard stop — LIVE trading
-  max_risk_per_ticker_pct: 0.50  # 50% max risk per ticker — live account $965
+  daily_loss_cap_pct: 0.50      # 50% daily loss cap — small account, 1 contract max
+  max_risk_per_ticker_pct: 0.60  # 60% max risk per ticker — $965 account, 5-wide IC = ~$475
   cooldown_consecutive_losses: 0
   cooldown_minutes: 0
 
