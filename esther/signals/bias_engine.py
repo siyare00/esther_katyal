@@ -234,7 +234,7 @@ class BiasEngine:
             )
 
         # Determine active pillars
-        active = self._determine_pillars(score)
+        active = self._determine_pillars(score, vix_level if "vix_level" in dir() else 0.0)
 
         result = BiasScore(
             symbol=symbol,
@@ -362,7 +362,7 @@ class BiasEngine:
         if confidence < 1.0:
             score *= confidence
 
-        active = self._determine_pillars(score)
+        active = self._determine_pillars(score, vix_level if "vix_level" in dir() else 0.0)
 
         components = {
             "tech_5m": tf_scores.get("5m", 0.0),
@@ -744,15 +744,33 @@ class BiasEngine:
         """
         return 25.0 <= vix_level <= 35.0
 
-    def _determine_pillars(self, score: float) -> list[int]:
+    def _determine_pillars(self, score: float, vix: float = 0.0) -> list[int]:
         """Map bias score to active trading pillars.
 
-        Pillars can overlap — e.g., score of +65 activates both P3 and P4.
+        SuperLuckeee rule:
+        - Strong directional bias (|score| > 35) + high VIX (>25) → P4 ONLY (buy puts/calls)
+          This is the "tariff panic" scenario — market is moving hard, ride the wave
+        - Neutral zone → P1 IC (sell premium)
+        - Moderate directional → P2/P3 spreads
         """
         ranges = self._cfg.pillar_ranges
         active: list[int] = []
 
-        # P1: Iron Condors — neutral zone
+        # SuperLuckeee rule: High conviction + High VIX = BUY DIRECTIONAL, skip IC
+        # When market is moving hard (|bias|>35) and VIX elevated (>25),
+        # ICs get crushed — go directional instead
+        strong_directional = abs(score) >= 35
+        high_vix = vix >= 25.0
+        if strong_directional and high_vix:
+            # Pure directional mode — P4 scalps + P2/P3 spreads, NO IC
+            if score <= ranges["p2_threshold"]:
+                active.append(2)  # Bear call spread
+            if score >= ranges["p3_threshold"]:
+                active.append(3)  # Bull put spread
+            active.append(4)      # Always directional scalp
+            return sorted(active)
+
+        # P1: Iron Condors — neutral zone (safe when market is calm)
         if ranges["p1_low"] <= score <= ranges["p1_high"]:
             active.append(1)
 

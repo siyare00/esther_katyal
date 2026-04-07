@@ -76,11 +76,11 @@ quality:
 # Pillar ranges — wider for more trades
 bias:
   pillar_ranges:
-    p1_low: -30
-    p1_high: 30
+    p1_low: -25
+    p1_high: 25
     p2_threshold: -25
     p3_threshold: 25
-    p4_threshold: 30
+    p4_threshold: 35
 
 # AI Debate
 ai:
