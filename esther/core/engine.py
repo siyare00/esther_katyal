@@ -168,6 +168,7 @@ class EstherEngine:
                 self._account_balance = 100_000  # fallback for sandbox
 
             self._risk_mgr = RiskManager(self._position_mgr, self._account_balance, risk_cfg=self._cfg.risk)
+            self._position_mgr.update_account_balance(self._account_balance)  # PDT mode detection
             self._running = True
 
             logger.info("engine_started", broker=self._broker, balance=self._account_balance)

@@ -193,6 +193,11 @@ class PositionManager:
         self._next_id = 1
         self._swing_positions: dict[str, Position] = {}  # Separate tracking for swings
         self._journal = TradeJournal()
+        self._account_balance: float = 0.0  # Updated by engine each cycle
+
+    def update_account_balance(self, balance: float) -> None:
+        """Update account balance — used for PDT mode detection."""
+        self._account_balance = balance
 
     async def _close_leg(
         self, symbol: str, option_symbol: str, side: str, quantity: int
@@ -556,14 +561,32 @@ class PositionManager:
     def _check_expire_worthless(self, pos: Position) -> None:
         """Check if a credit spread should be flagged to expire worthless.
 
-        Conditions:
+        PDT RULE: Under $25K, actively closing a position = day trade.
+        For credit spreads (P1/P2/P3), ALWAYS prefer expiry over active close
+        to avoid PDT violations. Only stop-loss closes should be active.
+
+        Conditions (standard):
         - Spread is >80% OTM (>2 standard deviations from current price)
         - Less than 15 minutes to market close
         - Position is profitable
 
-        This saves a day trade and captures maximum profit.
+        PDT mode: flag expire_worthless immediately for ALL P1 ICs.
         """
         if pos.pillar not in (1, 2, 3):
+            return
+
+        # PDT MODE: If account < $25K, flag all P1 ICs to expire worthless immediately
+        # Only stop-losses will actively close — everything else expires for max profit + no PDT
+        if hasattr(self, '_account_balance') and self._account_balance < 25_000:
+            if pos.pillar == 1 and not pos.expire_worthless_flagged:
+                pos.expire_worthless_flagged = True
+                logger.info(
+                    "pdt_mode_expire_worthless",
+                    id=pos.id,
+                    symbol=pos.symbol,
+                    pillar=pos.pillar,
+                    account_balance=getattr(self, '_account_balance', 0),
+                )
             return
 
         minutes_left = _minutes_to_close()
