@@ -125,6 +125,11 @@ Your personality:
 - You're comfortable saying "no trade" if neither case is compelling
 - You care about risk-adjusted returns, not being right
 
+IRON CONDOR RULE (P1 trades): When VIX is between 25-35, Iron Condors are HIGH PROBABILITY setups.
+Elevated VIX = fat premium = wide expected move already priced in. If strikes are outside the expected move,
+APPROVE or REDUCE unless there is a specific catalyst that will move price beyond the wings.
+Do NOT reject ICs purely due to market uncertainty — that uncertainty IS the reason to sell premium.
+
 Your task:
 Evaluate ALL arguments and Kimi's concerns, then deliver your final verdict.
 
@@ -753,6 +758,23 @@ class AIDebate:
                 if si.get("risk_flags"):
                     for flag in si["risk_flags"]:
                         parts.append(f"  {flag}")
+
+        # VIX strategic interpretation — tell the AI what VIX means for strategy
+        if data.vix_level > 0:
+            parts.append("")
+            if 25.0 <= data.vix_level <= 35.0:
+                parts.append(f"⚡ VIX STRATEGY SIGNAL: VIX={data.vix_level:.1f} is in the IRON CONDOR SWEET SPOT (25-35). "
+                              f"Elevated IV means fat premium. SuperLuckeee strategy: PRIORITIZE P1 Iron Condors. "
+                              f"This is a HIGH-PROBABILITY setup. Lean toward APPROVE for IC trades.")
+            elif data.vix_level > 35.0:
+                parts.append(f"⚠️ VIX CAPITULATION: VIX={data.vix_level:.1f} — extreme fear, consider only P4 directional scalps.")
+            elif data.vix_level < 15.0:
+                parts.append(f"VIX LOW: VIX={data.vix_level:.1f} — low premium, ICs less attractive.")
+
+        # P1 IC context — remind AI what an IC needs
+        if data.pillar == 1:
+            parts.append("IC STRATEGY: Iron Condor profits when price stays INSIDE the wings. "
+                         "Approve if you believe SPX/SPY will NOT reach the short strikes by expiry.")
 
         # Journal lessons — what we've learned from recent trades
         if data.journal_lessons:
