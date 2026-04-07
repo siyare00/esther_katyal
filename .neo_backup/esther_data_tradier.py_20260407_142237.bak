@@ -302,12 +302,11 @@ class TradierClient:
                             status=response_status)
                         # Allow up to 5 retries for 500 errors (backend issues)
                         max_500_retries = 5
-                        if attempt >= max_500_retries:  # Changed: allow full 5 attempts (0-4)
-                            # Store that this was a 500 error for proper error message
-                            last_error = f"Tradier order 500: {error_details}"
-                            break  # Let the outer loop handle the exception with correct count
+                        if attempt >= max_500_retries:
+                            # Raise with correct retry count for 500 errors
+                            raise RuntimeError(f"Max retries ({max_500_retries}) exceeded for {path} (500 error). Last error: {last_error}")
                         # Exponential backoff: 10s, 20s, 30s, 40s
-                        wait_time = min(10.0 * (attempt + 1), 40.0)
+                        wait_time = min(10.0 * attempt, 40.0)
                         logger.info("backend_error_backoff", attempt=attempt, wait_seconds=wait_time)
                         await asyncio.sleep(wait_time)
                         continue
@@ -327,9 +326,7 @@ class TradierClient:
                 raise
 
         # Include last error details in the exception
-        # For 500 errors, we actually tried max_500_retries times, not MAX_RETRIES
-        actual_retries = 5 if "500:" in str(last_error) else self.MAX_RETRIES
-        raise RuntimeError(f"Max retries ({actual_retries}) exceeded for {path}. Last error: {last_error}")
+        raise RuntimeError(f"Max retries ({self.MAX_RETRIES}) exceeded for {path}. Last error: {last_error}")
 
     # ── Market Data ──────────────────────────────────────────────
 

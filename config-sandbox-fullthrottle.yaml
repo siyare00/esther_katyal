@@ -6,7 +6,7 @@ tickers:
   tier1:
     symbols: ["SPY", "QQQ", "IWM", "SPX"]
     expiry: "1dte"
-    pillars: [1, 2, 3, 4]
+    pillars: [1, 2, 3]
 
   tier2:
     symbols: ["GLD", "SLV", "USO", "TLT"]
@@ -16,12 +16,12 @@ tickers:
   tier3:
     symbols: ["NVDA", "TSLA", "AAPL", "AMZN"]
     expiry: "weekly"
-    pillars: [1, 2, 3, 4]
+    pillars: [1, 2, 3]
 
   tier4:
     symbols: ["META", "MSFT", "AMD", "NFLX", "COIN", "PLTR", "GOOGL"]
     expiry: "weekly"
-    pillars: [1, 2, 3, 4]
+    pillars: [1, 2, 3]
 
 risk:
   max_positions:
