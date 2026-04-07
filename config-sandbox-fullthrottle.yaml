@@ -92,3 +92,9 @@ logging:
 
 # Allow more positions per ticker on sandbox
 risk_extra:
+
+# Sandbox: disable stops, let everything expire for max profit
+positions:
+  eod_close_minutes_before: 0   # Never time-exit early
+  disable_stops: true            # Sandbox fills are unrealistic, don't stop out
+  expire_all_at_eod: true        # Let all credit spreads expire worthless

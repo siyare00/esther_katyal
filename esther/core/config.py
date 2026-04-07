@@ -232,6 +232,14 @@ class LadderConfig(BaseModel):
     size_by_direction: bool = True
 
 
+class PositionsConfig(BaseModel):
+    """Position management configuration."""
+
+    eod_close_minutes_before: int = 15
+    disable_stops: bool = False      # Set True on sandbox — stops trigger on bad fills
+    expire_all_at_eod: bool = False  # Let all spreads expire worthless (no active close)
+
+
 class EstherConfig(BaseModel):
     """Top-level configuration model."""
 
@@ -250,6 +258,7 @@ class EstherConfig(BaseModel):
     flow: FlowConfig = FlowConfig()
     calendar: CalendarConfig = CalendarConfig()
     ladder: LadderConfig = LadderConfig()
+    positions: PositionsConfig = PositionsConfig()
 
 
 def load_config(config_path: str | Path | None = None) -> EstherConfig:

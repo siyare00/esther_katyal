@@ -858,6 +858,12 @@ class PositionManager:
         Returns:
             Close reason string, or empty string if no exit triggered.
         """
+        # Sandbox mode: disable all stops — sandbox fills are unrealistic
+        # Let positions expire worthless for max credit profit
+        positions_cfg = getattr(self._cfg, 'positions', None)
+        if positions_cfg and getattr(positions_cfg, 'disable_stops', False):
+            return ""  # Never close early in sandbox stop-disabled mode
+
         # Check P1-P3 profit target (75% of credit)
         if pos.pillar in (1, 2, 3):
             if pos.current_value <= pos.profit_target and pos.profit_target > 0:
