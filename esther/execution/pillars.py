@@ -312,7 +312,7 @@ class PillarExecutor:
             SpreadOrder ready for submission, or None if strikes can't be found.
         """
         cfg = self._cfg.p1
-        wing_width = 5  # 5-point wings — live small account
+        wing_width = 10  # 10-point wings — SuperLuckeee standard
 
         # Find short put (OTM, target delta)
         short_put = find_closest_delta(chain, cfg.short_delta, OptionType.PUT)
@@ -402,7 +402,7 @@ class PillarExecutor:
         Uses 10-point wings and 75% profit target.
         """
         cfg = self._cfg.p2
-        wing_width = 5  # 5-point wings — live small account
+        wing_width = 10  # 10-point wings — SuperLuckeee standard
 
         short_call = find_closest_delta(chain, cfg.short_delta, OptionType.CALL)
         if not short_call:
@@ -464,7 +464,7 @@ class PillarExecutor:
         Uses 10-point wings and 75% profit target.
         """
         cfg = self._cfg.p3
-        wing_width = 5  # 5-point wings — live small account
+        wing_width = 10  # 10-point wings — SuperLuckeee standard
 
         short_put = find_closest_delta(chain, cfg.short_delta, OptionType.PUT)
         if not short_put:
@@ -741,7 +741,7 @@ class PillarExecutor:
         Returns:
             ICLadderOrder with all rungs, or None if construction fails.
         """
-        wing_width = 5  # 5-point wings — live small account
+        wing_width = 10  # 10-point wings — SuperLuckeee standard
 
         # Define rung configurations: (delta_offset, put_contracts, call_contracts)
         # Delta offsets: rung 1 is closest to ATM, rung 3 is furthest OTM

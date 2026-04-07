@@ -754,8 +754,27 @@ class EstherEngine:
             log.debug("no_eligible_pillars", bias=adjusted_score, tier_allowed=list(tier_allowed))
             return
 
+        # ── Power Hour Mode (3:00-4:00 PM ET): P4 directional scalps ONLY ──
+        now_et_ph = datetime.now(ET)
+        if now_et_ph.time() >= time(15, 0) and now_et_ph.time() < time(16, 0):
+            if 4 in tier_allowed:
+                eligible_pillars = [4]
+                log.info("power_hour_active", original_pillars=eligible_pillars, forced_to=[4])
+            else:
+                log.debug("power_hour_no_p4_in_tier", tier_allowed=list(tier_allowed))
+                return
+
         # Determine direction from adjusted bias
-        if adjusted_score > 20:
+        # Power hour: any non-zero bias triggers directional (calls if >0, puts if <0)
+        is_power_hour = now_et_ph.time() >= time(15, 0) and now_et_ph.time() < time(16, 0)
+        if is_power_hour and eligible_pillars == [4]:
+            if adjusted_score > 0:
+                direction = "BULL"
+            elif adjusted_score < 0:
+                direction = "BEAR"
+            else:
+                direction = "NEUTRAL"
+        elif adjusted_score > 20:
             direction = "BULL"
         elif adjusted_score < -20:
             direction = "BEAR"

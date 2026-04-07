@@ -16,10 +16,10 @@ for each ticker by combining multiple technical indicators and signal sources:
     - Key Levels (support/resistance position)        weight: 0.10
 
 The bias score determines which trading Pillar(s) are active:
-    -20 to +20  → P1 (Iron Condors) — neutral range
-    Below -60   → P2 (Bear Call Spreads) — strong bearish
-    Above +60   → P3 (Bull Put Spreads) — strong bullish
-    ±40+        → P4 (Directional Scalps) — high conviction directional
+    -30 to +30  → P1 (Iron Condors) — neutral range
+    Below -25   → P2 (Bear Call Spreads) — strong bearish
+    Above +25   → P3 (Bull Put Spreads) — strong bullish
+    ±30+        → P4 (Directional Scalps) — high conviction directional
 
 Multi-timeframe support: bias is calculated on 5m, 15m, 1hr, daily bars
 separately, then combined with weights (5m: 0.30, 15m: 0.25, 1hr: 0.25, daily: 0.20).
@@ -185,6 +185,9 @@ class BiasEngine:
         # Macro data bias (from FRED economic data)
         macro_bias = self._calendar.get_macro_bias()
 
+        # Reversal detection (SuperLuckeee 3 Reversal Rules)
+        reversal_boost = self.detect_reversal(bars)
+
         components = {
             "vwap": round(vwap_score, 2),
             "ema_cross": round(ema_score, 2),
@@ -195,6 +198,7 @@ class BiasEngine:
             "regime": round(regime_adjustment, 2),
             "levels": round(levels_score, 2),
             "macro": round(macro_bias, 2),
+            "reversal": round(reversal_boost, 2),
         }
 
         # Weighted combination using new weights
@@ -209,6 +213,7 @@ class BiasEngine:
             + regime_adjustment * w.regime
             + levels_score * w.levels
             + macro_bias  # Additive: -50 to +50 direct contribution
+            + reversal_boost  # SuperLuckeee reversal: ±25 boost
         )
 
         # Clamp to [-100, 100], guard against NaN/Inf from missing data
@@ -662,6 +667,64 @@ class BiasEngine:
             "reasons": reasons,
             "allowed_pillars": allowed_pillars,
         }
+
+    def detect_reversal(self, bars: list[Bar], premarket_low: float | None = None) -> float:
+        """Detect reversal pattern per SuperLuckeee 3 Reversal Rules.
+
+        Checks:
+        1. Price held/bounced off premarket low (support)
+        2. Last 5-minute candle closed GREEN above PM low → bullish reversal
+        3. Reverse for bearish: price rejected premarket high + last candle RED
+
+        Returns:
+            Bias boost: positive for bullish reversal, negative for bearish, 0 if none.
+        """
+        if len(bars) < 3:
+            return 0.0
+
+        last_bar = bars[-1]
+        prev_bar = bars[-2]
+
+        # If premarket low not provided, estimate from first few bars of session
+        if premarket_low is None:
+            # Use lowest low of first 6 bars (~30 min of 5m bars) as proxy
+            session_start_bars = bars[:min(6, len(bars))]
+            premarket_low = min(b.low for b in session_start_bars)
+
+        # Estimate premarket high similarly
+        premarket_high = max(b.high for b in bars[:min(6, len(bars))])
+
+        boost = 0.0
+
+        # Bullish reversal: price dipped to PM low, last candle closed GREEN above it
+        last_candle_green = last_bar.close > last_bar.open
+        touched_pm_low = any(
+            b.low <= premarket_low * 1.002 for b in bars[-5:]
+        )
+        if touched_pm_low and last_candle_green and last_bar.close > premarket_low:
+            boost = 25.0
+            logger.info(
+                "reversal_bullish_detected",
+                pm_low=premarket_low,
+                last_close=last_bar.close,
+                last_open=last_bar.open,
+            )
+
+        # Bearish reversal: price hit PM high, last candle closed RED below it
+        last_candle_red = last_bar.close < last_bar.open
+        touched_pm_high = any(
+            b.high >= premarket_high * 0.998 for b in bars[-5:]
+        )
+        if touched_pm_high and last_candle_red and last_bar.close < premarket_high:
+            boost = -25.0
+            logger.info(
+                "reversal_bearish_detected",
+                pm_high=premarket_high,
+                last_close=last_bar.close,
+                last_open=last_bar.open,
+            )
+
+        return boost
 
     def is_ic_favorable_vix(self, vix_level: float) -> bool:
         """Check if VIX is in the iron condor sweet spot (25-35).
