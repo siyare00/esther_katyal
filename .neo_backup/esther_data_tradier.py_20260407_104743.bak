@@ -13,7 +13,7 @@ from typing import Any, AsyncIterator
 
 import httpx
 import structlog
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from esther.core.config import env
 
@@ -230,17 +230,12 @@ class TradierClient:
                 # Catch any other errors and preserve details
                 # Try to extract response body if available
                 error_details = str(e)
-                response_status = None
-                response_headers = {}
-                
                 if hasattr(e, 'response'):
                     try:
-                        response_status = getattr(e.response, 'status_code', None) or getattr(e.response, 'status', None)
-                        response_headers = dict(getattr(e.response, 'headers', {}))
                         if hasattr(e.response, 'text'):
-                            error_details = f"{str(e)} - Status: {response_status} - Response: {e.response.text}"
+                            error_details = f"{str(e)} - Response: {e.response.text}"
                         elif hasattr(e.response, 'content'):
-                            error_details = f"{str(e)} - Status: {response_status} - Response: {e.response.content}"
+                            error_details = f"{str(e)} - Response: {e.response.content}"
                     except:
                         pass  # Keep original error if extraction fails
                 
@@ -249,9 +244,7 @@ class TradierClient:
                     type=type(e).__name__, 
                     attempt=attempt,
                     path=path,
-                    method=method,
-                    status=response_status,
-                    headers=response_headers
+                    method=method
                 )
                 
                 # Store the detailed error immediately
@@ -259,17 +252,6 @@ class TradierClient:
                 
                 # Special handling for order submission errors
                 if "/orders" in path and method == "POST":
-                    # Check for specific Tradier error conditions
-                    if response_status == 503:  # Service unavailable
-                        logger.warning("tradier_service_unavailable", attempt=attempt)
-                        if attempt < self.MAX_RETRIES:
-                            await asyncio.sleep(10.0)  # Wait longer for service recovery
-                            continue
-                    elif response_status == 429:  # Rate limit
-                        logger.warning("tradier_rate_limit", attempt=attempt)
-                        if attempt < self.MAX_RETRIES:
-                            await asyncio.sleep(15.0)  # Back off significantly
-                            continue
                     # For order errors, fail fast after 2 attempts to avoid duplicate orders
                     if attempt >= 2:
                         break

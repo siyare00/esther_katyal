@@ -13,7 +13,7 @@ from typing import Any, AsyncIterator
 
 import httpx
 import structlog
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from esther.core.config import env
 
@@ -49,19 +49,6 @@ class Quote(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class OptionGreeks(BaseModel):
-    """Greeks for an option contract."""
-
-    delta: float = 0.0
-    gamma: float = 0.0
-    theta: float = 0.0
-    vega: float = 0.0
-    rho: float = 0.0
-    mid_iv: float = Field(default=0.0, alias="smv_vol")
-
-    model_config = {"populate_by_name": True}
-
-
 class OptionQuote(BaseModel):
     """Single option contract quote."""
 
@@ -77,17 +64,18 @@ class OptionQuote(BaseModel):
     open_interest: int = 0
     greeks: OptionGreeks | None = None
 
-    @field_validator("greeks", mode="before")
-    @classmethod
-    def coerce_greeks(cls, v):
-        """Accept OptionGreeks object or dict — Pydantic v2 safe coercion."""
-        if v is None:
-            return None
-        if isinstance(v, OptionGreeks):
-            return v  # Already correct type — pass through
-        if isinstance(v, dict):
-            return OptionGreeks(**v)
-        return None  # Unknown type — drop greeks rather than crash
+
+class OptionGreeks(BaseModel):
+    """Greeks for an option contract."""
+
+    delta: float = 0.0
+    gamma: float = 0.0
+    theta: float = 0.0
+    vega: float = 0.0
+    rho: float = 0.0
+    mid_iv: float = Field(default=0.0, alias="smv_vol")
+
+    model_config = {"populate_by_name": True}
 
 
 class Bar(BaseModel):
@@ -230,17 +218,12 @@ class TradierClient:
                 # Catch any other errors and preserve details
                 # Try to extract response body if available
                 error_details = str(e)
-                response_status = None
-                response_headers = {}
-                
                 if hasattr(e, 'response'):
                     try:
-                        response_status = getattr(e.response, 'status_code', None) or getattr(e.response, 'status', None)
-                        response_headers = dict(getattr(e.response, 'headers', {}))
                         if hasattr(e.response, 'text'):
-                            error_details = f"{str(e)} - Status: {response_status} - Response: {e.response.text}"
+                            error_details = f"{str(e)} - Response: {e.response.text}"
                         elif hasattr(e.response, 'content'):
-                            error_details = f"{str(e)} - Status: {response_status} - Response: {e.response.content}"
+                            error_details = f"{str(e)} - Response: {e.response.content}"
                     except:
                         pass  # Keep original error if extraction fails
                 
@@ -249,33 +232,20 @@ class TradierClient:
                     type=type(e).__name__, 
                     attempt=attempt,
                     path=path,
-                    method=method,
-                    status=response_status,
-                    headers=response_headers
+                    method=method
                 )
-                
-                # Store the detailed error immediately
-                last_error = error_details
                 
                 # Special handling for order submission errors
                 if "/orders" in path and method == "POST":
-                    # Check for specific Tradier error conditions
-                    if response_status == 503:  # Service unavailable
-                        logger.warning("tradier_service_unavailable", attempt=attempt)
-                        if attempt < self.MAX_RETRIES:
-                            await asyncio.sleep(10.0)  # Wait longer for service recovery
-                            continue
-                    elif response_status == 429:  # Rate limit
-                        logger.warning("tradier_rate_limit", attempt=attempt)
-                        if attempt < self.MAX_RETRIES:
-                            await asyncio.sleep(15.0)  # Back off significantly
-                            continue
                     # For order errors, fail fast after 2 attempts to avoid duplicate orders
                     if attempt >= 2:
+                        last_error = f"{type(e).__name__}: {error_details}"
                         break
                     # Longer delay for order retries to let broker recover
                     await asyncio.sleep(5.0)
                     continue
+                
+                last_error = f"{type(e).__name__}: {error_details}"
                 # For unknown errors, use exponential backoff with jitter
                 if attempt < self.MAX_RETRIES - 1:
                     jitter = random.uniform(0, 0.5)  # Add 0-500ms jitter

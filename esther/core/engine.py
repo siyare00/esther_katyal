@@ -1241,10 +1241,13 @@ class EstherEngine:
 
         if pillar == 4:
             # Directional scalp — must match direction
+            # High-confidence NEUTRAL = AI approves the trade but used wrong label
+            if verdict.confidence >= 70 and v == "NEUTRAL":
+                return True  # Trust confidence over label for P4
             if direction == "BULL":
-                return v == "BULL"
+                return v in ("BULL", "NEUTRAL")
             elif direction == "BEAR":
-                return v == "BEAR"
+                return v in ("BEAR", "NEUTRAL")
 
         if pillar == 5:
             # Butterfly — needs directional conviction
