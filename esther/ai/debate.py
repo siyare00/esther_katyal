@@ -694,7 +694,15 @@ class AIDebate:
         if kage_v == "REDUCE" and kimi_v != "REJECT":
             return True, "REDUCE", 0.5
 
-        # Rule 4 & 5: Disagreement → REJECT
+        # Rule 4: Kage APPROVE + Kimi REJECT → REDUCE at 50% (Kage is senior judge)
+        if kage_v == "APPROVE" and kimi_v == "REJECT":
+            return True, "REDUCE", 0.5
+
+        # Rule 5: Kimi APPROVE + Kage REJECT → REJECT (Kage has final say)
+        if kimi_v == "APPROVE" and kage_v == "REJECT":
+            return False, "REJECT", 1.0
+
+        # Rule 6: Any other disagreement → REJECT
         return False, "REJECT", 1.0
 
     def _build_market_context(self, data: DebateInput) -> str:

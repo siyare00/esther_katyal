@@ -211,7 +211,9 @@ class BiasEngine:
             + macro_bias  # Additive: -50 to +50 direct contribution
         )
 
-        # Clamp to [-100, 100]
+        # Clamp to [-100, 100], guard against NaN/Inf from missing data
+        if not np.isfinite(raw_score):
+            raw_score = 0.0
         score = float(np.clip(raw_score, -100, 100))
 
         # Calendar confidence adjustment

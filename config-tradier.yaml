@@ -13,10 +13,10 @@ tickers:
     expiry: "weekly"
     pillars: [2, 3, 4]
   tier3:
-    # Mega-cap tech + high-IV names — weekly, directional + spreads
+    # Mega-cap tech + high-IV names — weekly, directional + spreads + ICs
     symbols: ["NVDA", "TSLA", "AAPL", "AMZN", "META", "GOOGL", "MSFT", "AMD", "NFLX", "COIN", "MSTR", "PLTR", "SOFI", "IONQ", "RIVN", "UBER"]
     expiry: "weekly"
-    pillars: [2, 3, 4]
+    pillars: [1, 2, 3, 4]
 
 # Inherit everything else from defaults — only override what differs
 # Bias, quality, pillars, risk, AI, sizing all use same defaults
