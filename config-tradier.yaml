@@ -3,10 +3,10 @@
 
 tickers:
   tier1:
-    # SuperLuckeee PRIMARY: SPX/SPY/QQQ/IWM — 0DTE Iron Condors + all pillars
-    # These are the CORE money-makers. Always on. 0DTE only.
+    # SuperLuckeee PRIMARY: SPX/SPY/QQQ/IWM — 1DTE Iron Condors + all pillars
+    # 1DTE: more credit, less gamma risk, avoids same-day PDT close
     symbols: ["SPY", "QQQ", "IWM", "SPX"]
-    expiry: "0dte"
+    expiry: "1dte"
     pillars: [1, 2, 3, 4]
 
   tier2:

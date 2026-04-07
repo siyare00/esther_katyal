@@ -1136,9 +1136,20 @@ class EstherEngine:
             # Use today's expiration if available, otherwise nearest
             if today in expirations:
                 return today
-            # Find the nearest future expiration
             future = [e for e in expirations if e >= today]
             return future[0] if future else None
+
+        elif expiry_type == "1dte":
+            # Use tomorrow's expiration (next trading day after today)
+            future = [e for e in expirations if e > today]
+            if not future:
+                return None
+            # Find expiration 1 trading day out (tomorrow or nearest)
+            for exp in future:
+                days_out = (date.fromisoformat(exp) - date.today()).days
+                if days_out <= 2:  # tomorrow or day after (handles weekends)
+                    return exp
+            return future[0]
 
         elif expiry_type == "weekly":
             # Find the nearest Friday expiration (or nearest weekly)
