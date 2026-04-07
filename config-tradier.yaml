@@ -59,7 +59,7 @@ engine:
   pre_market_scan: "09:15"
   eod_cleanup: "15:50"
   first_trade_after: "10:00"    # SuperLuckeee: no trades in first 30min FOMO zone
-  max_trades_per_day: 3         # PDT limit — max 3 day trades/5 days
+  max_trades_per_day: 10        # 1DTE = not day trades (close tomorrow), can do more
 
 # Quality — match Alpaca aggressive settings
 quality:

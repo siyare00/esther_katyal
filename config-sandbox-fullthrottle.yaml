@@ -1,0 +1,90 @@
+# Esther Sandbox Config — FULL THROTTLE COMPOUNDING
+# No PDT limits. No trade caps. Compound everything. Run hard.
+# Uses Tradier SANDBOX API (free paper trading)
+
+tickers:
+  tier1:
+    symbols: ["SPY", "QQQ", "IWM", "SPX"]
+    expiry: "1dte"
+    pillars: [1, 2, 3, 4]
+
+  tier2:
+    symbols: ["GLD", "SLV", "USO", "TLT"]
+    expiry: "weekly"
+    pillars: [2, 3, 4]
+
+  tier3:
+    symbols: ["NVDA", "TSLA", "AAPL", "AMZN"]
+    expiry: "weekly"
+    pillars: [1, 2, 3, 4]
+
+  tier4:
+    symbols: ["META", "MSFT", "AMD", "NFLX", "COIN", "PLTR", "GOOGL"]
+    expiry: "weekly"
+    pillars: [1, 2, 3, 4]
+
+risk:
+  max_positions:
+    tier1: 50
+    tier2: 20
+    tier3: 20
+    tier4: 20
+    tier5: 20
+  daily_loss_cap_pct: 0.02      # 2% hard stop even on sandbox — protect the run
+  max_risk_per_ticker_pct: 0.75
+  cooldown_consecutive_losses: 0
+  cooldown_minutes: 0
+
+inversion:
+  consecutive_loss_trigger: 1
+  state_file: "data/inversion_state_sandbox.json"
+
+engine:
+  scan_interval_seconds: 120    # 2 min scans — faster on sandbox
+  market_open: "09:30"
+  market_close: "16:00"
+  pre_market_scan: "09:15"
+  eod_cleanup: "15:50"
+  first_trade_after: "10:00"
+  max_trades_per_day: 50        # NO LIMIT — full throttle
+
+quality:
+  max_spread_pct: 0.25
+  min_volume:
+    tier1: 50
+    tier2: 25
+    tier3: 25
+  iv_rank:
+    spread_min: 15
+    spread_max: 85
+    iron_condor_min: 20
+
+bias:
+  pillar_ranges:
+    p1_low: -30
+    p1_high: 30
+    p2_threshold: -25
+    p3_threshold: 25
+    p4_threshold: 30
+
+ai:
+  model: "gemini-2.5-flash"
+  max_tokens: 1024
+  temperature: 0.7
+  ai_backend: "gemini"
+  gemini_model: "gemini-2.5-flash"
+  gemini_fallback_models:
+    - "gemini-3-flash-preview"
+
+# COMPOUNDING SIZING — grow contracts as account grows
+# Win streak: add 30% each win. Never reduce on losses (sandbox = learn aggression)
+sizing:
+  kelly_fraction: 0.75          # More aggressive Kelly
+  min_contracts: 10             # Start at 10 (SuperLuckeee minimum)
+  max_contracts: 100            # Scale to 100 (SuperLuckeee big account)
+  win_streak_multiplier: 1.30   # +30% per win streak
+  loss_streak_divisor: 1.0      # Don't reduce — keep compounding
+
+logging:
+  level: "INFO"
+  file: "logs/esther-sandbox.log"
