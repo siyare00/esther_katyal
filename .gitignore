@@ -29,3 +29,5 @@ Thumbs.db
 build_v3.py
 data/intel/
 data/gtc_orders.json
+esther_backup_*/
+COMPLETE_SOURCE*.py
