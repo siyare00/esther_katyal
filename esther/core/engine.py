@@ -1023,6 +1023,7 @@ class EstherEngine:
             symbol=symbol,
             tier=tier_name,
             max_risk=total_max_risk,
+            pillar=pillar,
         )
 
         if not risk_check.approved:

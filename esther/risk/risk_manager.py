@@ -422,6 +422,7 @@ class RiskManager:
         max_risk: float,
         is_swing: bool = False,
         is_scale_in: bool = False,
+        pillar: int = 1,
     ) -> RiskCheck:
         """Pre-trade risk check. Must pass before any order is submitted.
 
@@ -587,7 +588,11 @@ class RiskManager:
                 )
 
         # Check 9: Would this trade push us past the daily loss cap?
-        if daily_pnl - max_risk <= -self.daily_loss_cap:
+        # NOTE: For credit spreads (P1/P2/P3), max_risk = margin requirement (worst case).
+        # We should NOT gate entries on margin requirement vs daily loss cap —
+        # that blocks ALL trades on small accounts. Only gate on realized P&L.
+        # This check only applies to debit trades (P4 scalps) where max_risk = actual cash outlay.
+        if pillar == 4 and daily_pnl - max_risk <= -self.daily_loss_cap:
             return RiskCheck(
                 approved=False,
                 reason=f"RISK_TOO_HIGH: Current P&L ${daily_pnl:,.2f} - max risk ${max_risk:,.2f} "
