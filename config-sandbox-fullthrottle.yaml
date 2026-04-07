@@ -30,9 +30,9 @@ risk:
     tier3: 20
     tier4: 20
     tier5: 20
-  daily_loss_cap_pct: 0.02      # 2% hard stop even on sandbox — protect the run
+  max_positions_per_ticker: 5
+  daily_loss_cap_pct: 0.02
   max_risk_per_ticker_pct: 0.75
-    max_positions_per_ticker: 5
   cooldown_consecutive_losses: 0
   cooldown_minutes: 0
 
@@ -41,13 +41,13 @@ inversion:
   state_file: "data/inversion_state_sandbox.json"
 
 engine:
-  scan_interval_seconds: 120    # 2 min scans — faster on sandbox
+  scan_interval_seconds: 120
   market_open: "09:30"
   market_close: "16:00"
   pre_market_scan: "09:15"
   eod_cleanup: "15:50"
   first_trade_after: "10:00"
-  max_trades_per_day: 50        # NO LIMIT — full throttle
+  max_trades_per_day: 50
 
 quality:
   max_spread_pct: 0.25
@@ -77,24 +77,19 @@ ai:
   gemini_fallback_models:
     - "gemini-3-flash-preview"
 
-# COMPOUNDING SIZING — grow contracts as account grows
-# Win streak: add 30% each win. Never reduce on losses (sandbox = learn aggression)
 sizing:
-  kelly_fraction: 0.75          # More aggressive Kelly
-  min_contracts: 10             # Start at 10 (SuperLuckeee minimum)
-  max_contracts: 100            # Scale to 100 (SuperLuckeee big account)
-  win_streak_multiplier: 1.30   # +30% per win streak
-  loss_streak_divisor: 1.0      # Don't reduce — keep compounding
+  kelly_fraction: 0.75
+  min_contracts: 10
+  max_contracts: 100
+  win_streak_multiplier: 1.30
+  loss_streak_divisor: 1.0
+
+# Disable stops on sandbox — fills are unrealistic, let everything expire
+positions:
+  eod_close_minutes_before: 0
+  disable_stops: true
+  expire_all_at_eod: true
 
 logging:
   level: "INFO"
   file: "logs/esther-sandbox.log"
-
-# Allow more positions per ticker on sandbox
-risk_extra:
-
-# Sandbox: disable stops, let everything expire for max profit
-positions:
-  eod_close_minutes_before: 0   # Never time-exit early
-  disable_stops: true            # Sandbox fills are unrealistic, don't stop out
-  expire_all_at_eod: true        # Let all credit spreads expire worthless
