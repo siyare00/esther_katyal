@@ -275,6 +275,7 @@ class Sage:
 
         await self._populate_flow(intel)
         await self._populate_prices(intel)
+        await self._populate_dynamic_tickers(intel)
         self._calculate_expected_moves(intel)
 
         intel.intel_brief = self._build_intraday_brief(intel)
@@ -371,12 +372,17 @@ class Sage:
     async def _populate_prices(self, intel: MarketIntel) -> None:
         """Pull current/last close prices from Tradier."""
         try:
-            live_key = self._env.tradier_live_api_key if hasattr(self._env, 'tradier_live_api_key') else self._env.tradier_api_key
+            live_key = self._env.tradier_live_api_key or self._env.tradier_api_key
+            if not live_key:
+                logger.warning("sage_price_skip_no_api_key")
+                return
             headers = {"Authorization": f"Bearer {live_key}", "Accept": "application/json"}
 
+            # Use sandbox URL when tradier_live_api_key is not set
+            base_url = "https://api.tradier.com" if self._env.tradier_live_api_key else "https://sandbox.tradier.com"
             async with httpx.AsyncClient(timeout=15) as client:
                 resp = await client.get(
-                    "https://api.tradier.com/v1/markets/quotes",
+                    f"{base_url}/v1/markets/quotes",
                     headers=headers,
                     params={"symbols": "SPY,SPX,VIX,QQQ,IWM"},
                 )
@@ -420,14 +426,18 @@ class Sage:
         """Scan LEAP watchlist for buy zone alerts."""
         try:
             # Get prices for watchlist stocks
-            live_key = self._env.tradier_live_api_key if hasattr(self._env, 'tradier_live_api_key') else self._env.tradier_api_key
+            live_key = self._env.tradier_live_api_key or self._env.tradier_api_key
+            if not live_key:
+                logger.warning("sage_watchlist_skip_no_api_key")
+                return
             headers = {"Authorization": f"Bearer {live_key}", "Accept": "application/json"}
 
+            base_url = "https://api.tradier.com" if self._env.tradier_live_api_key else "https://sandbox.tradier.com"
             symbols = [e.symbol for e in self._watchlist.watchlist if e.buy_zone_high > 0]
             if symbols:
                 async with httpx.AsyncClient(timeout=15) as client:
                     resp = await client.get(
-                        "https://api.tradier.com/v1/markets/quotes",
+                        f"{base_url}/v1/markets/quotes",
                         headers=headers,
                         params={"symbols": ",".join(symbols)},
                     )

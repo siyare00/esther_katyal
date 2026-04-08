@@ -676,6 +676,31 @@ class EstherEngine:
                     # One ticker failing doesn't stop the loop
                     continue
 
+        # Step 5: Process Sage dynamic tickers (top 20 UW flow tickers)
+        sage_intel = self._sage.latest
+        if sage_intel and sage_intel.dynamic_tickers:
+            # Collect all symbols already scanned from config tiers
+            already_scanned = set()
+            for tn in tier_order:
+                tc = self._cfg.tickers.get(tn)
+                if tc:
+                    already_scanned.update(tc.symbols)
+
+            # Use tier2-style config for dynamic tickers (weekly, P2/P3/P4)
+            dynamic_tier_cfg = TierConfig(symbols=[], expiry="weekly", pillars=[2, 3, 4])
+            new_tickers = [t for t in sage_intel.dynamic_tickers if t not in already_scanned]
+            if new_tickers:
+                logger.info("sage_dynamic_tickers_processing", count=len(new_tickers), tickers=new_tickers[:5])
+                for symbol in new_tickers[:20]:
+                    if not self._running:
+                        return
+                    try:
+                        await self._process_ticker(symbol, "sage_dynamic", dynamic_tier_cfg)
+                    except Exception as e:
+                        self._errors_today += 1
+                        logger.warning("sage_dynamic_ticker_failed", symbol=symbol, error=str(e))
+                        continue
+
         logger.info(
             "scan_cycle_complete",
             cycle=self._scan_count,
@@ -972,7 +997,7 @@ class EstherEngine:
         )
 
         try:
-            verdict = await self._debate.debate(debate_input)  # Kage-only: Riki→Abi→Kage (no Kimi veto)
+            verdict = await self._debate.debate_with_kimi(debate_input)  # Full 5-agent: Kimi→Riki→Abi→Kimi challenge→Kage
         except Exception as e:
             self._errors_today += 1
             log.error("debate_failed", error=str(e))

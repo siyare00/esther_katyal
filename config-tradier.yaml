@@ -63,14 +63,14 @@ engine:
 
 # Quality — match Alpaca aggressive settings
 quality:
-  max_spread_pct: 0.25
+  max_spread_pct: 0.15
   min_volume:
     tier1: 100
     tier2: 50
     tier3: 50
   iv_rank:
-    spread_min: 20
-    spread_max: 80
+    spread_min: 15
+    spread_max: 85
     iron_condor_min: 25
 
 # Pillar ranges — wider for more trades

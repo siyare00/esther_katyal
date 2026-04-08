@@ -83,9 +83,9 @@ class BlackSwanConfig(BaseModel):
 
 
 class QualityConfig(BaseModel):
-    max_spread_pct: float = 0.20
+    max_spread_pct: float = 0.15
     min_volume: dict[str, int] = {"tier1": 500, "tier2": 100, "tier3": 200}
-    iv_rank: dict[str, float] = {"spread_min": 30, "spread_max": 70, "iron_condor_min": 50}
+    iv_rank: dict[str, float] = {"spread_min": 15, "spread_max": 85, "iron_condor_min": 25}
 
 
 class PillarP1Config(BaseModel):
