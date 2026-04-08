@@ -167,6 +167,26 @@ class EstherEngine:
                 logger.warning("balance_fetch_failed", error=str(e))
                 self._account_balance = 100_000  # fallback for sandbox
 
+            # ── PDT SAFETY GUARD ──────────────────────────────────────────
+            # If this is a live (non-sandbox) account with balance < $25K,
+            # HARD BLOCK — do not start the engine. PDT violations on a live
+            # account under $25K cause broker restrictions. Log and abort.
+            if not self._sandbox and self._account_balance < 25_000:
+                logger.error(
+                    "pdt_hard_block",
+                    balance=self._account_balance,
+                    reason=(
+                        f"LIVE account balance ${self._account_balance:,.2f} is below $25,000. "
+                        "PDT rules apply — engine WILL NOT start to prevent PDT violations. "
+                        "Deposit funds to bring account above $25K or switch to sandbox mode."
+                    ),
+                )
+                raise RuntimeError(
+                    f"PDT HARD BLOCK: Live account ${self._account_balance:,.2f} < $25,000. "
+                    "Engine refuses to trade. Deposit funds or use --sandbox."
+                )
+            # ── END PDT SAFETY GUARD ──────────────────────────────────────
+
             self._risk_mgr = RiskManager(self._position_mgr, self._account_balance, risk_cfg=self._cfg.risk)
             self._position_mgr.update_account_balance(self._account_balance)  # PDT mode detection
             self._running = True

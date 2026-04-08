@@ -474,16 +474,47 @@ class RiskManager:
             )
 
         # Check 3: PDT (Pattern Day Trader) restriction
-        if self.is_pdt_restricted() and not is_swing:
+        # HARD BLOCK: On live accounts under $25K, NEVER allow a new opening trade.
+        # Opening + closing on the same day = day trade = PDT violation.
+        # Credit spreads opened AND closed same day always count regardless of is_swing.
+        if self.is_pdt_restricted():
+            # Additional block: no new trades in the last 30 minutes of market (3:30–4:00 PM ET).
+            # Positions opened that close at EOD = guaranteed day trade = PDT violation.
+            now_et = datetime.now()
+            from datetime import time as _time
+            _pdt_cutoff = _time(15, 30)
+            _market_close = _time(16, 0)
+            if _pdt_cutoff <= now_et.time() < _market_close:
+                return RiskCheck(
+                    approved=False,
+                    reason=f"PDT_POWER_HOUR_BLOCK: Account ${self.account_balance:,.0f} < $25K. "
+                           "No new opening trades after 3:30 PM — any position opened now "
+                           "will be closed at EOD creating a guaranteed PDT day-trade.",
+                    pdt_trades_remaining=self.get_pdt_trades_remaining(),
+                    daily_pnl=daily_pnl,
+                    daily_loss_cap=self.daily_loss_cap,
+                    account_tier=account_tier.tier_name,
+                )
+
             remaining = self.get_pdt_trades_remaining()
             if remaining <= 0:
                 return RiskCheck(
                     approved=False,
-                    reason=f"PDT_LIMIT: 0 day trades remaining (account ${self.account_balance:,.0f} < $25K)",
+                    reason=f"PDT_LIMIT: 0 day trades remaining (account ${self.account_balance:,.0f} < $25K). "
+                           "No new opening trades allowed — PDT hard block.",
                     pdt_trades_remaining=0,
                     daily_pnl=daily_pnl,
                     daily_loss_cap=self.daily_loss_cap,
                     account_tier=account_tier.tier_name,
+                )
+            # Even if trades remain, warn loudly and limit to 1 trade per day on sub-$25K accounts
+            if remaining <= 1:
+                logger.warning(
+                    "pdt_final_trade_warning",
+                    symbol=symbol,
+                    remaining=remaining,
+                    balance=self.account_balance,
+                    warning="This is your LAST allowed day trade. Account under $25K.",
                 )
 
         # Check 3b: Recent loser — handled by ReentryGuard in engine (candle-based, not time-based)
